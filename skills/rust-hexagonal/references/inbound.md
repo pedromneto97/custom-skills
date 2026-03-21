@@ -41,7 +41,7 @@ use uuid::Uuid;
 use crate::state::{AppRepository, AppState};
 use super::dto::OrderResponse;
 
-#[get("/orders/{id}")]
+#[get("/{id}")]
 pub async fn get_order(
     path: web::Path<Uuid>,
     state: web::Data<AppState>,
@@ -53,7 +53,7 @@ pub async fn get_order(
     }
 }
 
-#[post("/orders/{id}/confirm")]
+#[post("/{id}/confirm")]
 pub async fn confirm_order(
     path: web::Path<Uuid>,
     state: web::Data<AppState>,
@@ -66,7 +66,7 @@ pub async fn confirm_order(
     }
 }
 
-#[get("/orders")]
+#[get("")]
 pub async fn list_orders(
     state: web::Data<AppState>,
 ) -> impl Responder {
@@ -81,15 +81,20 @@ pub async fn list_orders(
 
 ### Router Configuration
 
+The version prefix is declared **once** at the router level; handlers never reference it.
+
 ```rust
 use actix_web::web;
 
 pub fn order_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/orders")
-            .service(get_order)
-            .service(confirm_order)
-            .service(list_orders),
+        web::scope("/api/v1")
+            .service(
+                web::scope("/orders")
+                    .service(get_order)
+                    .service(confirm_order)
+                    .service(list_orders),
+            ),
     );
 }
 ```
@@ -178,6 +183,8 @@ pub async fn get_order(
 
 ### Router
 
+The version prefix is declared **once** via `.nest`; handlers never reference it.
+
 ```rust
 // inbound/src/http/router.rs  (axum variant)
 use axum::{routing::get, Router};
@@ -190,7 +197,11 @@ pub fn order_router<R: AppRepository + Clone>(
     state: Arc<AppState<R>>,
 ) -> Router {
     Router::new()
-        .route("/orders/:id", get(get_order))
+        .nest("/api/v1", Router::new()
+            .nest("/orders", Router::new()
+                .route("/{id}", get(get_order)),
+            ),
+        )
         .with_state(state)
 }
 ```
