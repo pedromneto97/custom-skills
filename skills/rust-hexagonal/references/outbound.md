@@ -129,8 +129,18 @@ impl OrderRepository for SeaOrmOrderRepository {
     }
 
     async fn save(&self, order: &Order) -> Result<(), DomainError> {
-        mappers::to_active_model(order)
-            .insert(&self.db)
+        // Use upsert: INSERT … ON CONFLICT (id) DO UPDATE.
+        // A plain .insert() would fail with a duplicate-key error when
+        // saving a mutated order that already exists in the DB.
+        use sea_orm::sea_query::OnConflict;
+        use entities::order::Column;
+        entities::order::Entity::insert(mappers::to_active_model(order))
+            .on_conflict(
+                OnConflict::column(Column::Id)
+                    .update_column(Column::Status)
+                    .to_owned(),
+            )
+            .exec(&self.db)
             .await
             .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
         Ok(())

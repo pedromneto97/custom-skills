@@ -17,11 +17,20 @@ receive `web::Data<AppState<R>>` and call free use case functions, passing `&sta
 // inbound/src/state.rs
 use domain::ports::outbound::OrderRepository;
 
-// Combines all outbound traits needed by this adapter
+// Combines all outbound traits needed by this adapter.
+// As bounded contexts grow, add new repository supertrait variants
+// (e.g. CustomerAppRepository) rather than expanding this one.
 pub trait AppRepository: OrderRepository + Send + Sync + 'static {}
 
-pub struct AppState {
-    pub repo: Arc<impl AppRepository>,
+// Blanket impl: any type that satisfies the bounds is automatically an AppRepository.
+// This means SeaOrmOrderRepository (outbound) never needs to name this inbound trait.
+impl<T: OrderRepository + Send + Sync + 'static> AppRepository for T {}
+
+// Generic over R so the adapter has zero knowledge of concrete types.
+// web::Data<AppState<R>> (actix) or Arc<AppState<R>> (axum) provides
+// the shared-ownership wrapper — no Arc needed in this struct.
+pub struct AppState<R: AppRepository> {
+    pub repo: R,
 }
 ```
 
@@ -41,34 +50,38 @@ use uuid::Uuid;
 use crate::state::{AppRepository, AppState};
 use super::dto::OrderResponse;
 
+// Handlers are generic over R: AppRepository.
+// web::Data<AppState<R>> is extracted by actix-web from its type map;
+// the concrete R is only named in app/src/main.rs.
+
 #[get("/{id}")]
-pub async fn get_order(
+pub async fn get_order<R: AppRepository>(
     path: web::Path<Uuid>,
-    state: web::Data<AppState>,
+    state: web::Data<AppState<R>>,
 ) -> impl Responder {
     match orders::get_order(&state.repo, *path).await {
-        Ok(order) => HttpResponse::Ok().json(OrderResponse::from(order)),
-        Err(DomainError::OrderNotFound(_)) => HttpResponse::NotFound().finish(),
-        Err(_) => HttpResponse::InternalServerError().finish(),
+        Ok(order)                           => HttpResponse::Ok().json(OrderResponse::from(order)),
+        Err(DomainError::OrderNotFound(_))  => HttpResponse::NotFound().finish(),
+        Err(_)                              => HttpResponse::InternalServerError().finish(),
     }
 }
 
 #[post("/{id}/confirm")]
-pub async fn confirm_order(
+pub async fn confirm_order<R: AppRepository>(
     path: web::Path<Uuid>,
-    state: web::Data<AppState>,
+    state: web::Data<AppState<R>>,
 ) -> impl Responder {
     match orders::confirm_order(&state.repo, *path).await {
-        Ok(order) => HttpResponse::Ok().json(OrderResponse::from(order)),
-        Err(DomainError::InvalidStatusTransition) => HttpResponse::UnprocessableEntity().finish(),
-        Err(DomainError::OrderNotFound(_)) => HttpResponse::NotFound().finish(),
-        Err(_) => HttpResponse::InternalServerError().finish(),
+        Ok(order)                                        => HttpResponse::Ok().json(OrderResponse::from(order)),
+        Err(DomainError::InvalidStatusTransition)        => HttpResponse::UnprocessableEntity().finish(),
+        Err(DomainError::OrderNotFound(_))               => HttpResponse::NotFound().finish(),
+        Err(_)                                           => HttpResponse::InternalServerError().finish(),
     }
 }
 
 #[get("")]
-pub async fn list_orders(
-    state: web::Data<AppState>,
+pub async fn list_orders<R: AppRepository>(
+    state: web::Data<AppState<R>>,
 ) -> impl Responder {
     match orders::list_orders(&state.repo).await {
         Ok(orders) => HttpResponse::Ok().json(
@@ -86,14 +99,16 @@ The version prefix is declared **once** at the router level; handlers never refe
 ```rust
 use actix_web::web;
 
-pub fn order_routes(cfg: &mut web::ServiceConfig) {
+// Generic over R so the concrete type is only named in app/src/main.rs.
+// Called as: .configure(order_routes::<SeaOrmOrderRepository>)
+pub fn order_routes<R: AppRepository + 'static>(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/api/v1")
             .service(
                 web::scope("/orders")
-                    .service(get_order)
-                    .service(confirm_order)
-                    .service(list_orders),
+                    .service(get_order::<R>)
+                    .service(confirm_order::<R>)
+                    .service(list_orders::<R>),
             ),
     );
 }
@@ -169,14 +184,14 @@ use uuid::Uuid;
 use crate::state::{AppRepository, AppState};
 use super::dto::OrderResponse;
 
-pub async fn get_order(
+pub async fn get_order<R: AppRepository>(
     Path(id): Path<Uuid>,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState<R>>>,
 ) -> impl IntoResponse {
     match orders::get_order(&state.repo, id).await {
-        Ok(order) => (StatusCode::OK, Json(OrderResponse::from(order))).into_response(),
+        Ok(order)                          => (StatusCode::OK, Json(OrderResponse::from(order))).into_response(),
         Err(DomainError::OrderNotFound(_)) => StatusCode::NOT_FOUND.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(_)                             => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 ```
@@ -192,14 +207,15 @@ use std::sync::Arc;
 use crate::state::{AppRepository, AppState};
 use super::orders::get_order;
 
-// R must be Clone + Send + Sync + 'static for axum state
-pub fn order_router<R: AppRepository + Clone>(
+// Arc<AppState<R>> is always Clone (Arc is Clone regardless of R),
+// so no Clone bound is needed on R.
+pub fn order_router<R: AppRepository>(
     state: Arc<AppState<R>>,
 ) -> Router {
     Router::new()
         .nest("/api/v1", Router::new()
             .nest("/orders", Router::new()
-                .route("/{id}", get(get_order)),
+                .route("/{id}", get(get_order::<R>)),
             ),
         )
         .with_state(state)

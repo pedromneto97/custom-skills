@@ -17,20 +17,20 @@ my-app/
 │       │   └── customer.rs
 │       ├── ports/
 │       │   ├── mod.rs
-│       │   ├── inbound.rs                  # trait OrderUseCase
-│       │   └── outbound.rs                 # trait OrderRepository
+│       │   └── outbound.rs                 # trait OrderRepository  (no inbound.rs — use cases are free fns)
 │       └── use_cases/
 │           ├── mod.rs
-│           └── order_service.rs            # OrderService<R: OrderRepository>
+│           └── order_service.rs            # pub async fn get_order<R: OrderRepository>(…)
 │
 ├── inbound/                                # lib — HTTP/gRPC/CLI adapters
 │   ├── Cargo.toml                          # deps: domain, actix-web (or axum), serde
 │   └── src/
-│       ├── lib.rs                          # pub mod http;
+│       ├── lib.rs                          # pub mod http; pub mod state;
+│       ├── state.rs                        # trait AppRepository + blanket impl; struct AppState<R>
 │       └── http/
 │           ├── mod.rs
-│           ├── router.rs                   # fn order_routes<U: OrderUseCase + 'static>
-│           ├── orders.rs                   # handler fns generic over U: OrderUseCase
+│           ├── router.rs                   # fn order_routes<R: AppRepository + 'static>
+│           ├── orders.rs                   # handler fns generic over R: AppRepository
 │           └── dto.rs                      # request/response structs (serde) — never domain types
 │
 ├── outbound/                               # lib — DB/cache adapters
@@ -44,10 +44,18 @@ my-app/
 │           │   └── order.rs               # sea_orm Entity, Model, ActiveModel
 │           └── mappers.rs                  # entity Model ↔ domain::Order
 │
+├── migration/                              # lib — DB migrations (sea-orm-cli migrate init)
+│   ├── Cargo.toml                          # deps: sea-orm-migration only — no domain/app imports
+│   └── src/
+│       ├── lib.rs                          # Migrator struct + MigratorTrait impl
+│       └── m20240101_000001_create_order_table.rs
+│
 └── app/                                    # bin — sole composition root
     ├── Cargo.toml                          # deps: all crates above
     └── src/
-        └── main.rs                         # wire concrete types → serve
+        ├── main.rs                         # wire concrete types → serve
+        ├── config.rs                       # AppConfig::from_env()
+        └── state.rs                        # build_state(cfg) → AppState<SeaOrmOrderRepository>
 ```
 
 ---
@@ -58,13 +66,14 @@ Only list dependencies that are **shared across multiple crates**. Layer-specifi
 
 ```toml
 [workspace]
-members  = ["domain", "inbound", "outbound", "app"]
+members  = ["domain", "inbound", "outbound", "migration", "app"]
 resolver = "2"
 
 [workspace.dependencies]
-domain   = { path = "domain" }
-inbound  = { path = "inbound" }
-outbound = { path = "outbound" }
+domain    = { path = "domain" }
+inbound   = { path = "inbound" }
+outbound  = { path = "outbound" }
+migration = { path = "migration" }
 
 # shared across multiple crates
 tokio     = { version = "1", features = ["full"] }
@@ -74,7 +83,7 @@ serde     = { version = "1", features = ["derive"] }
 anyhow    = "1"
 
 # actix-web  ← NOT here: only used in inbound
-# sea-orm    ← NOT here: only used in outbound
+# sea-orm    ← NOT here: only used in outbound / migration
 ```
 
 ---
@@ -143,12 +152,14 @@ sea-orm = { version = "2", features = ["sqlx-postgres", "runtime-tokio-rustls", 
 | `domain` | nothing (std + thiserror + uuid) |
 | `inbound` | `domain` only |
 | `outbound` | `domain` only |
+| `migration` | nothing (sea-orm-migration only) |
 | `app` | all of the above |
 
 **Forbidden edges (never list in `Cargo.toml`):**
 - `inbound` → `outbound`
 - `outbound` → `inbound`
 - `domain` → any adapter or app crate
+- `migration` → `domain`, `inbound`, or `outbound`
 
 ---
 
@@ -158,7 +169,7 @@ Add an `application` crate between `domain` and `app`:
 
 ```toml
 # workspace Cargo.toml
-members = ["domain", "application", "inbound", "outbound", "app"]
+members = ["domain", "application", "inbound", "outbound", "migration", "app"]
 ```
 
 - `domain` has no `tokio` dependency

@@ -12,7 +12,7 @@ Hexagonal Architecture (Ports & Adapters) isolates the **domain** from all exter
 
 **Call flow (always this direction):**
 ```
-[ HTTP / CLI / gRPC ]  →  inbound  →  U: UseCase  →  domain  →  R: Repository  →  outbound  →  [ DB / APIs ]
+[ HTTP / CLI / gRPC ]  →  inbound  →  use case fns(R)  →  domain  →  R: Repository  →  outbound  →  [ DB / APIs ]
 ```
 
 Dependencies point **inward only** (enforced via `Cargo.toml`):
@@ -63,6 +63,7 @@ my-app/
 ├── domain/             # lib — model, errors, ports, use cases (Layout A)
 ├── inbound/            # lib — HTTP/gRPC/CLI adapters  (actix-web preferred; axum supported)
 ├── outbound/           # lib — DB/cache adapters (SeaORM v2)
+├── migration/          # lib — DB migrations (sea-orm-migration only; no domain imports)
 └── app/                # bin — sole composition root
 ```
 
@@ -78,8 +79,9 @@ See [folder structure & Cargo.toml templates](./references/folder-structure.md).
 |------|-----|
 | `domain` never imports infrastructure crates | Portable, testable core |
 | Port traits live in `domain` | Domain owns its own contracts |
-| Use cases are **generic** over `R: Repository` | Static dispatch: zero overhead |
-| Inbound handlers are **generic** over `U: UseCase` | No concrete type leaks into HTTP layer |
+| Use cases are **free async functions** generic over `R: Repository` | Static dispatch, no boilerplate trait impl |
+| Inbound handlers are **generic** over `R: AppRepository` via `web::Data<AppState<R>>` | No concrete type leaks into the HTTP layer |
+| `AppRepository` is a supertrait in `inbound` with a blanket impl | Outbound crates never import `inbound`; composition stays in `app` |
 | `inbound` and `outbound` depend **only on `domain`** | No cross-adapter coupling |
 | Prefer **`impl Iterator<Item = T>`** over `Vec<T>` in collection ports | Caller decides whether/how to allocate |
 | Prefer **static dispatch** (generics); use `Arc<dyn Trait>` only when runtime polymorphism is needed | Zero-cost unless you opt in |
@@ -97,8 +99,8 @@ Load only the reference for the layer you're working on:
 | 1 | Domain model (entities, value objects) | [domain.md](./references/domain.md) |
 | 2 | Domain errors | [domain.md](./references/domain.md) |
 | 3 | Outbound port (repository trait) | [domain.md](./references/domain.md) |
-| 4 | Inbound port (use case trait) | [domain.md](./references/domain.md) |
-| 5 | Use case implementation | [domain.md](./references/domain.md) |
+| 4 | Use case functions | [domain.md](./references/domain.md) |
+| 5 | DB migrations | [migrations.md](./references/migrations.md) |
 | 6 | Outbound adapter (SeaORM repository) | [outbound.md](./references/outbound.md) + `sea-orm` skill |
 | 7 | Inbound adapter (actix-web / axum) | [inbound.md](./references/inbound.md) + `http-actix-axum` skill |
 | 8 | Wire & run | [bootstrap.md](./references/bootstrap.md) |
@@ -112,7 +114,7 @@ Load only the reference for the layer you're working on:
 | Domain model | Pure unit tests — no async, no mocks |
 | Use case | `#[tokio::test]` + `mockall` mock of outbound port |
 | Outbound adapter | SeaORM `MockDatabase` or test containers |
-| Inbound adapter | `actix_web::test` with generic handler + mock use case |
+| Inbound adapter | `actix_web::test` with generic handler + mock repository |
 
 See [testing reference](./references/testing.md).
 
@@ -139,8 +141,47 @@ See [testing reference](./references/testing.md).
 
 - **Domain importing infrastructure crates** — `domain/Cargo.toml` must list no `sea-orm`, `actix-web`, `axum`, etc.
 - **Cross-adapter coupling** — `inbound` and `outbound` must not import each other; enforced by their `Cargo.toml`.
-- **Handler holding a concrete service type** — `web::Data<OrderService<PgRepo>>` leaks the concrete type. Use `web::Data<U>` where `U: UseCase + 'static` to keep the adapter generic.
+- **Handler holding a concrete service type** — `web::Data<OrderService<PgRepo>>` leaks the concrete type. Use `web::Data<AppState<R>>` where `R: AppRepository` to keep the adapter generic.
 - **Unnecessary `async-trait`** — only add it when you need `dyn Trait`. With static dispatch and Rust ≥ 1.75, remove it from port traits.
 - **Returning `Vec<T>` from collection ports** — prefer `impl Iterator<Item = T>`; the adapter collects from DB internally but the interface stays flexible.
 - **Leaking SeaORM types into domain** — `Model`, `ActiveModel`, column enums belong in `outbound/src/db/`. Map to domain structs in `mappers.rs` immediately.
 - **Bloated `app/main.rs`** — extract `fn wire_orders(db)` helpers per bounded context; keep `main` under ~30 lines.
+- **Using `.insert()` in `save()`** — always INSERT fails for existing records. Use an `ON CONFLICT … DO UPDATE` upsert (see `outbound.md`).
+- **`find_all()` without pagination** — fetching entire tables into memory will OOM in production. Add `page`/`limit` or cursor parameters to collection port signatures before the table grows.
+- **Expanding `AppRepository` with every new trait** — when adding a second bounded context (e.g. `CustomerRepository`), create a focused `CustomerAppRepository` supertrait rather than bolting it onto the existing one. Handlers that only handle orders should not receive a repo that also exposes customer operations.
+
+---
+
+## Scaling to Multiple Bounded Contexts
+
+As the application grows beyond a single `orders` domain, organise by bounded context **within each crate** before splitting crates:
+
+```
+domain/src/
+├── lib.rs              # pub mod orders; pub mod customers;
+├── orders/
+│   ├── mod.rs          # pub mod model; pub mod error; pub mod ports; pub mod use_cases;
+│   └── …
+└── customers/
+    ├── mod.rs
+    └── …
+
+inbound/src/
+├── state.rs            # separate AppRepository supertrait per context if needed
+└── http/
+    ├── orders/         # handlers, router, dto for orders
+    └── customers/      # handlers, router, dto for customers
+
+outbound/src/db/
+├── orders/             # repository, entities, mappers
+└── customers/
+```
+
+**When to split into separate crates / microservices:**
+
+| Signal | Action |
+|--------|--------|
+| Two bounded contexts never share a DB transaction | Safe to extract into separate services |
+| Compile times become painful | Move large bounded context to its own workspace |
+| Independent deployment cadence required | Extract to its own binary (`app-orders`, `app-customers`) |
+| Team ownership boundaries diverge | Separate repos with a shared `domain` lib published to a registry |

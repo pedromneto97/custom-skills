@@ -48,10 +48,10 @@ Constructs `AppState<R>` (defined in `inbound`) by wiring outbound adapters into
 ```rust
 use inbound::state::AppState;
 use outbound::db::SeaOrmOrderRepository;
-use std::sync::Arc;
 use super::config::AppConfig;
 
-pub type AppStateImpl = AppState;
+// Name the concrete type once, here.
+pub type AppStateImpl = AppState<SeaOrmOrderRepository>;
 
 pub async fn build_state(cfg: &AppConfig) -> anyhow::Result<AppStateImpl> {
     let db = sea_orm::Database::connect(&cfg.database_url).await?;
@@ -59,8 +59,10 @@ pub async fn build_state(cfg: &AppConfig) -> anyhow::Result<AppStateImpl> {
     // Run pending migrations before accepting traffic
     migration::Migrator::up(&db, None).await?;
 
+    // AppState<R> does not own an Arc — web::Data (actix) or Arc::new (axum)
+    // provides shared ownership at the composition root.
     Ok(AppState {
-        repo: Arc::new(SeaOrmOrderRepository::new(db)),
+        repo: SeaOrmOrderRepository::new(db),
     })
 }
 ```
@@ -90,7 +92,8 @@ async fn main() -> anyhow::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(state_data.clone())
-            .configure(order_routes)
+            // Turbofish names the concrete R; only required when inference fails.
+            .configure(order_routes::<SeaOrmOrderRepository>)
     })
     .bind((cfg.host.as_str(), cfg.port))?
     .run()
@@ -105,8 +108,9 @@ Handlers in `inbound` remain generic and receive `web::Data<AppState<R>>`:
 // inbound/src/http/orders.rs
 pub async fn get_order<R: AppRepository>(
     path: web::Path<Uuid>,
-    state: web::Data<AppState<R>>,   // ← extracted by actix-web
+    state: web::Data<AppState<R>>,   // ← actix extracts from type map
 ) -> impl Responder { ... }
+```
 ```
 
 ---
