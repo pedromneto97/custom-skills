@@ -1,20 +1,16 @@
 # custom-skills
 
-A collection of GitHub Copilot skills providing domain-specific knowledge for Rust backend development.
+GitHub Copilot skills for Rust backend development, providing production-ready patterns and best practices.
 
 ## Skills
 
-### `rust-hexagonal`
-Hexagonal architecture (Ports & Adapters) for Rust backends. Covers structuring the domain layer, defining ports as traits, implementing adapters (HTTP, DB, gRPC), wiring dependency injection, and separating business logic from infrastructure.
+| Skill | Description | When |
+|-------|-------------|------|
+| `rust-hexagonal` | Hexagonal architecture (Ports & Adapters) for Rust backends. Covers workspace structure, domain modeling, port traits, dependency injection, composition root, testing strategies, and multi-bounded-context scaling. **Refs:** folder-structure, domain, bootstrap, inbound, outbound, http-practices, migrations, testing. | New Rust backend project |
+| `http-actix-axum` | HTTP best practices for actix-web 4 and axum 0.7+. Covers REST naming conventions, HTTP status codes, error responses (RFC 9457 Problem Details), OWASP security headers, CORS, response compression, and API versioning. **Refs:** compression, cors, problem-details, security-headers. | Building Rust HTTP endpoints |
+| `sea-orm` | SeaORM v2 database patterns for Rust (Postgres, MySQL, SQLite, with SeaORM-X for MSSQL). Covers setup, migrations, entity generation, CRUD operations, pagination, relationship handling, transaction management, and on-conflict/upsert strategies. **Refs:** 01-cargo-setup, 02-connection, 03-migrations, 04-entity-structure, 05-crud-insert, 06-crud-select, 07-crud-update-delete, 08-mssql-features, 09-v1-v2-migration. | SeaORM database work |
+| `crypto-best-practices` | Cryptographic operations and security best practices for Rust: password hashing, encryption algorithms, key management, secure authentication patterns, and common pitfalls to avoid. | Authentication & encryption |
 
-**Reference files:** folder structure, domain, bootstrap, inbound/outbound adapters, HTTP practices, migrations, testing.
 
-### `http-actix-axum`
-HTTP best practices for **actix-web 4** and **axum 0.7+**. Covers REST resource naming, HTTP status codes, RFC 9457 Problem Details error responses, OWASP security headers, CORS configuration, response compression, and API versioning.
 
-**Reference files:** compression, CORS, problem-details, security-headers.
-
-### `sea-orm`
-SeaORM v2 (Postgres/MySQL/SQLite) and SeaORM-X (commercial MSSQL) patterns. Covers project setup, database connections, migrations, entity generation, CRUD operations, pagination, relations, on-conflict handling, and MSSQL-specific features.
-
-**Reference files:** cargo setup, connection, migrations, entity structure, CRUD insert/select/update/delete, MSSQL features, v1→v2 migration guide.
+Skills are designed to work together—see the hexagonal architecture skill for how `http-actix-axum` and `sea-orm` integrate with the architecture.
