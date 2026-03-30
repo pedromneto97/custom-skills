@@ -145,3 +145,58 @@ Decision guide:
 - Priority order: **Brotli → gzip → deflate** (auto-negotiated from `Accept-Encoding`)
 - Skip already-compressed content: images (jpeg/png/gif/webp), video, `application/zip`, `application/pdf`
 - Skip small responses: < 1 KB gains nothing
+
+---
+
+## 8. Input Validation
+
+Use the [`validator`](https://crates.io/crates/validator) crate to annotate request structs. Call `.validate()` at the top of each handler; convert `ValidationErrors` to a 400 Problem Detail via `From<ValidationErrors> for ApiError`.
+
+→ Read [`references/problem-details.md`](./references/problem-details.md) for the `From<ValidationErrors>` impl and the domain-validation bridge pattern.
+
+**actix-web**
+```rust
+#[derive(Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateOrderRequest {
+    #[validate(length(min = 1, max = 100))]
+    pub customer_name: String,
+    #[validate(email)]
+    pub email: String,
+}
+
+pub async fn create_order<R: AppRepository>(
+    state: web::Data<AppState<R>>,
+    body: web::Json<CreateOrderRequest>,
+) -> Result<impl Responder, ApiError> {
+    body.validate()?; // ValidationErrors → ApiError via From impl → 400 Problem Detail
+    let order = orders::create_order(&state.repo, body.into_inner().into()).await?;
+    Ok(HttpResponse::Created()
+        .insert_header(("Location", format!("/api/v1/orders/{}", order.id)))
+        .json(OrderResponse::from(order)))
+}
+```
+
+**Domain-validation bridge** (when domain owns the rules):
+```rust
+use validator::ValidationError;
+use domain::use_cases::validate_customer_name; // pure domain fn → Vec<String>
+
+fn customer_name_valid(val: &str) -> Result<(), ValidationError> {
+    match validate_customer_name(val) {
+        Ok(_) => Ok(()),
+        Err(errors) => {
+            let mut e = ValidationError::new("customer_name")
+                .with_message("Invalid customer name".into());
+            e.add_param("errors".into(), &errors);
+            Err(e)
+        }
+    }
+}
+
+#[derive(Deserialize, Validate)]
+pub struct CreateOrderRequest {
+    #[validate(custom(function = "customer_name_valid"))]
+    pub customer_name: String,
+}
+```

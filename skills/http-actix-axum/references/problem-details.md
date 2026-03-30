@@ -122,18 +122,62 @@ pub async fn get_order<R: AppRepository>(
 ### Validation error (400)
 
 ```rust
-use validator::Validate;
+use validator::{Validate, ValidationErrors};
 
-body.validate().map_err(|e| {
-    ApiError(ProblemDetail {
-        problem_type: "https://example.com/errors/validation-error".into(),
-        title: "Validation Error".into(),
-        status: 400,
-        detail: e.to_string(),
-        instance: None,
-    })
-})?;
+// In the handler — validate before calling the use case:
+body.validate().map_err(ApiError::from)?; // or body.validate()?
 ```
+
+```rust
+// Conversion — inbound/src/http/error.rs
+use validator::ValidationErrors;
+
+impl From<ValidationErrors> for ApiError {
+    fn from(e: ValidationErrors) -> Self {
+        ApiError(ProblemDetail {
+            problem_type: "about:blank".into(),
+            title: "Validation Error".into(),
+            status: 400,
+            detail: e.to_string(),
+            instance: None,
+        })
+    }
+}
+```
+
+### Domain-validation bridge
+
+When the domain owns the validation rules, bridge them into the `validator` crate so the
+same logic is reused at the HTTP boundary without duplicating rules:
+
+```rust
+// domain exposes a pure fn that returns Vec<String> errors:
+// pub fn validate_password(pw: &str) -> Result<(), Vec<String>>
+
+use validator::ValidationError;
+use domain::use_cases::validate_password;
+
+fn password_valid(val: &str) -> Result<(), ValidationError> {
+    match validate_password(val) {
+        Ok(_) => Ok(()),
+        Err(errors) => {
+            let mut e = ValidationError::new("password")
+                .with_message("Password is too weak".into());
+            e.add_param("errors".into(), &errors);
+            Err(e)
+        }
+    }
+}
+
+#[derive(Deserialize, Validate)]
+pub struct RegisterRequest {
+    #[validate(custom(function = "password_valid"))]
+    pub password: String,
+}
+```
+
+> Trimming / normalising input (e.g. `name.trim().to_string()`) should happen in
+> `From<RequestType> for UseCaseInput`, **not** in the validator function.
 
 ---
 
