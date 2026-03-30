@@ -5,6 +5,99 @@ and infrastructure crates — never `inbound`.
 
 ---
 
+## Single-struct, all-ports pattern
+
+For applications with a single database, implement all repository port traits on one struct
+that wraps the connection pool. Each port gets its own `impl` block.
+
+```rust
+// outbound/src/database/connection.rs
+use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+use std::time::Duration;
+
+#[derive(Debug, Clone)]
+pub struct AppDatabase {
+    pub(crate) connection: DatabaseConnection,  // pub(crate) — never leaks outside outbound
+}
+
+impl AppDatabase {
+    pub async fn new() -> Self {
+        let url = std::env::var("DATABASE_URL").expect("DATABASE_URL not set");
+        let mut opts = ConnectOptions::new(url);
+        opts.max_connections(50)
+            .min_connections(1)
+            .connect_timeout(Duration::from_secs(8))
+            .acquire_timeout(Duration::from_secs(8))
+            .idle_timeout(Duration::from_secs(300));
+        let conn = Database::connect(opts).await
+            .unwrap_or_else(|e| { eprintln!("DB connect failed: {e}"); std::process::exit(1) });
+        Self { connection: conn }
+    }
+
+    pub async fn run_migrations(&self) {
+        use migration::{Migrator, MigratorTrait};
+        Migrator::up(&self.connection, None).await
+            .unwrap_or_else(|e| { eprintln!("Migration failed: {e}"); std::process::exit(1) });
+    }
+
+    pub async fn ping(&self) -> Result<(), sea_orm::DbErr> {
+        self.connection.ping().await
+    }
+}
+```
+
+Repository traits are implemented as separate `impl AppDatabase` blocks:
+
+```rust
+// outbound/src/repositories/order.rs
+use domain::{error::DomainError, model::Order, ports::OrderRepository};
+use tracing::error;
+use crate::database::{connection::AppDatabase, models::order as order_entity};
+
+impl OrderRepository for AppDatabase {
+    tracing::instrument(skip(self))
+    async fn find_by_id(&self, id: i64) -> Result<Option<Order>, DomainError> {
+        order_entity::Entity::find_by_id(id)
+            .one(&self.connection).await
+            .map_err(|err| {
+                error!(error = %err, "DB error finding order by id {id}");
+
+                DomainError::Infrastructure("db".into())
+            })
+            .map(|m| m.map(Order::from))
+    }
+
+    tracing::instrument(skip(self))
+    async fn find_all(&self) -> Result<impl Iterator<Item = Order>, DomainError> {
+        let rows = order_entity::Entity::find()
+            .all(&self.connection).await
+            .map_err(|err| {
+                error!(error = %err, "DB error finding all orders");
+
+                DomainError::Infrastructure("db".into())
+            })?;
+        Ok(rows.into_iter().map(Order::from))
+    }
+}
+```
+
+`outbound/src/lib.rs` exports only `AppDatabase`:
+
+```rust
+mod database;
+pub use database::AppDatabase;
+```
+
+> **Advantage:** no per-repository `new(db)` boilerplate; no cloning `DatabaseConnection`
+> per repository. `AppDatabase` is `Clone` (inner pool is `Arc`-backed), so it can be
+> passed as `web::Data<AppState<…>>` without extra wrappers.
+
+> **Alternative (separate struct per repo):** Preferred when repositories are tested
+> independently or when a bounded context is split into its own crate later.
+> See the classic `SeaOrmOrderRepository` example below.
+
+---
+
 ## SeaORM CLI: Generate Entities
 
 ```bash
@@ -55,33 +148,52 @@ impl ActiveModelBehavior for ActiveModel {}
 
 ## Mappers
 
-Translate immediately between SeaORM `Model` and domain types. Nothing leaks.
+Translate between SeaORM `Model` and domain types at the repository boundary.
+Prefer `From` / `Into` impls over free functions — they integrate with Rust's type system
+(`model.into()`, `Order::from(model)`) and can be called uniformly in iterator chains.
 
 ```rust
-// outbound/src/db/mappers.rs
-use domain::model::order::{CustomerId, Order, OrderId, OrderStatus};
-use super::entities::order;
+// outbound/src/database/mappers.rs
+use domain::model::order::{Order, OrderId, OrderStatus};
+use super::models::order;
 
-pub fn to_domain(m: order::Model) -> Order {
-    Order {
-        id: OrderId(m.id),
-        customer_id: CustomerId(m.customer_id),
-        status: match m.status.as_str() {
-            "Confirmed" => OrderStatus::Confirmed,
-            "Shipped"   => OrderStatus::Shipped,
+impl From<order::Model> for Order {
+    fn from(m: order::Model) -> Self {
+        Order {
+            id:          OrderId(m.id),
+            customer_id: m.customer_id,
+            status:      OrderStatus::from(m.status),
+        }
+    }
+}
+
+impl From<OrderStatus> for String {
+    fn from(s: OrderStatus) -> Self {
+        match s {
+            OrderStatus::Pending   => "pending".into(),
+            OrderStatus::Confirmed => "confirmed".into(),
+            OrderStatus::Shipped   => "shipped".into(),
+        }
+    }
+}
+
+impl From<String> for OrderStatus {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "confirmed" => OrderStatus::Confirmed,
+            "shipped"   => OrderStatus::Shipped,
             _           => OrderStatus::Pending,
-        },
+        }
     }
 }
+```
 
-pub fn to_active_model(o: &Order) -> order::ActiveModel {
-    use sea_orm::ActiveValue::Set;
-    order::ActiveModel {
-        id:          Set(o.id.0),
-        customer_id: Set(o.customer_id.0),
-        status:      Set(format!("{:?}", o.status)),
-    }
-}
+Call at the repository boundary:
+
+```rust
+let row: order::Model = order_entity::Entity::find_by_id(id).one(&self.db).await?
+    .ok_or(DomainError::OrderNotFound(id))?;
+let domain_order: Order = row.into(); // From impl invoked here
 ```
 
 ---
@@ -97,6 +209,7 @@ use domain::{
     ports::outbound::OrderRepository,
 };
 use uuid::Uuid;
+use tracing::error;
 use super::{entities::order::Entity as OrderEntity, mappers};
 
 pub struct SeaOrmOrderRepository {
@@ -110,24 +223,34 @@ impl SeaOrmOrderRepository {
 }
 
 impl OrderRepository for SeaOrmOrderRepository {
+    #[tracing::instrument(skip(self))]
     async fn find_by_id(&self, id: Uuid) -> Result<Order, DomainError> {
         OrderEntity::find_by_id(id)
             .one(&self.db)
             .await
-            .map_err(|e| DomainError::Infrastructure(e.to_string()))?
+            .map_err(|e| {
+                error!(error = %e, "DB error finding order by id {id}");
+
+                DomainError::Infrastructure(e.to_string())
+            })?
             .map(mappers::to_domain)
             .ok_or(DomainError::OrderNotFound(id))
     }
 
     // Returns impl Iterator — callers decide whether to collect
+    #[tracing::instrument(skip(self))]
     async fn find_all(&self) -> Result<impl Iterator<Item = Order>, DomainError> {
         let rows = OrderEntity::find()
             .all(&self.db)
             .await
-            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+            .map_err(|e| {
+                error!(error = %e, "DB error finding all orders");
+                DomainError::Infrastructure(e.to_string())
+            })?;
         Ok(rows.into_iter().map(mappers::to_domain))
     }
 
+    #[tracing::instrument(skip(self, order))]  
     async fn save(&self, order: &Order) -> Result<(), DomainError> {
         // Use upsert: INSERT … ON CONFLICT (id) DO UPDATE.
         // A plain .insert() would fail with a duplicate-key error when
@@ -142,7 +265,10 @@ impl OrderRepository for SeaOrmOrderRepository {
             )
             .exec(&self.db)
             .await
-            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+            .map_err(|e| {
+                error!(error = %e, "DB error saving order {order:?}");
+                DomainError::Infrastructure(e.to_string())
+            })?;
         Ok(())
     }
 }

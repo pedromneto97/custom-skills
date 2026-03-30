@@ -9,40 +9,53 @@ my-app/
 ├── domain/                                 # lib — ZERO infrastructure deps
 │   ├── Cargo.toml
 │   └── src/
-│       ├── lib.rs                          # pub mod model; pub mod error; pub mod ports; pub mod use_cases;
+│       ├── lib.rs                          # #![allow(async_fn_in_trait)]; pub mod model; pub mod error; pub mod ports; pub mod use_cases;
 │       ├── error.rs                        # DomainError (thiserror)
 │       ├── model/
 │       │   ├── mod.rs
 │       │   ├── order.rs                    # Order, OrderId, OrderStatus
 │       │   └── customer.rs
 │       ├── ports/
-│       │   ├── mod.rs
-│       │   └── outbound.rs                 # trait OrderRepository  (no inbound.rs — use cases are free fns)
+│       │   ├── mod.rs                      # pub trait AppRepository (supertrait combining all port traits + ping)
+│       │   └── order.rs                    # trait OrderRepository (use #[automock] only if no RPIT methods)
 │       └── use_cases/
 │           ├── mod.rs
-│           └── order_service.rs            # pub async fn get_order<R: OrderRepository>(…)
+│           └── order/
+│               ├── mod.rs                  # re-export public use case fns
+│               ├── create.rs               # pub async fn create_order<R: OrderRepository>(…)
+│               └── get.rs
 │
 ├── inbound/                                # lib — HTTP/gRPC/CLI adapters
-│   ├── Cargo.toml                          # deps: domain, actix-web (or axum), serde
+│   ├── Cargo.toml                          # deps: domain, actix-web (or axum), serde, validator
 │   └── src/
-│       ├── lib.rs                          # pub mod http; pub mod state;
-│       ├── state.rs                        # trait AppRepository + blanket impl; struct AppState<R>
+│       ├── lib.rs                          # pub async fn run<TS, R>(state: AppState<TS, R>) — HTTP server bootstrap
+│       ├── config.rs                       # struct AppState<TS: TokenService, R: AppRepository>
 │       └── http/
 │           ├── mod.rs
-│           ├── router.rs                   # fn order_routes<R: AppRepository + 'static>
-│           ├── orders.rs                   # handler fns generic over R: AppRepository
-│           └── dto.rs                      # request/response structs (serde) — never domain types
+│           ├── router.rs                   # fn configure<TS, R>(cfg) — compose all bounded context scopes under /api/v1
+│           ├── error.rs                    # ApiError + ResponseError + From<DomainError> + From<ValidationErrors>
+│           ├── middleware/
+│           │   └── auth.rs                 # JwtClaims<TS, R> FromRequest extractor
+│           ├── health/
+│           │   └── mod.rs
+│           └── orders/                     # one directory per bounded context
+│               ├── mod.rs                  # configure fn
+│               ├── handler.rs              # handler fns generic over <TS, R>
+│               ├── payload.rs              # #[derive(Deserialize, Validate)] request structs
+│               └── response.rs             # #[derive(Serialize)] response structs + From<DomainType>
 │
 ├── outbound/                               # lib — DB/cache adapters
-│   ├── Cargo.toml                          # deps: domain, sea-orm
+│   ├── Cargo.toml                          # deps: domain, migration, sea-orm
 │   └── src/
-│       ├── lib.rs                          # pub mod db;
-│       └── db/
+│       ├── lib.rs                          # pub use database::AppDatabase;
+│       └── database/
 │           ├── mod.rs
-│           ├── order_repository.rs         # SeaOrmOrderRepository implements OrderRepository
-│           ├── entities/
-│           │   └── order.rs               # sea_orm Entity, Model, ActiveModel
-│           └── mappers.rs                  # entity Model ↔ domain::Order
+│           ├── connection.rs               # AppDatabase (wraps DatabaseConnection; all ports impl on this struct)
+│           ├── models/                     # SeaORM entities — never leave outbound crate
+│           │   └── order.rs
+│           ├── repositories/               # one file per aggregate root; impl XRepository for AppDatabase
+│           │   └── order.rs
+│           └── mappers.rs                  # From<entity::Model> for DomainType (and reverse for enums)
 │
 ├── migration/                              # lib — DB migrations (sea-orm-cli migrate init)
 │   ├── Cargo.toml                          # deps: sea-orm-migration only — no domain/app imports
@@ -51,11 +64,11 @@ my-app/
 │       └── m20240101_000001_create_order_table.rs
 │
 └── app/                                    # bin — sole composition root
-    ├── Cargo.toml                          # deps: all crates above
+    ├── Cargo.toml                          # deps: all crates above + jsonwebtoken (if JWT lives here)
     └── src/
-        ├── main.rs                         # wire concrete types → serve
-        ├── config.rs                       # AppConfig::from_env()
-        └── state.rs                        # build_state(cfg) → AppState<SeaOrmOrderRepository>
+        ├── main.rs                         # wire AppState<JwtTokenService, AppDatabase> → inbound::run(state)
+        └── core/
+            └── auth.rs                     # JwtTokenService implements domain::ports::TokenService
 ```
 
 ---

@@ -23,11 +23,44 @@ mod tests {
 
 ### 2. Use Case Tests (free functions + mock repo)
 
-Use cases are `async fn`s that take `repo: &R`. Pass a `MockOrderRepository` directly —
+Use cases are `async fn`s that take `repo: &R`. Pass a mock or fake directly —
 no struct, no `Arc<dyn ...>`.
 
+> **mockall limitation:** `#[cfg_attr(test, mockall::automock)]` **cannot** be applied to a
+> trait method that returns `impl Trait` in return position (RPIT), e.g.
+> `async fn find_all() -> Result<impl Iterator<Item = Order>, DomainError>`.
+>
+> **Rule: only `automock` traits with concrete return types.** For RPIT traits, write a
+> hand-written fake struct:
+>
+> ```rust
+> #[cfg(test)]
+> pub struct FakeOrderRepository { pub orders: Vec<Order> }
+>
+> #[cfg(test)]
+> impl OrderRepository for FakeOrderRepository {
+>     async fn find_by_id(&self, id: Uuid) -> Result<Order, DomainError> {
+>         self.orders.iter().find(|o| o.id.0 == id).cloned()
+>             .ok_or(DomainError::OrderNotFound(id))
+>     }
+>     async fn find_all(&self) -> Result<impl Iterator<Item = Order>, DomainError> {
+>         Ok(self.orders.clone().into_iter())
+>     }
+>     async fn save(&self, _o: &Order) -> Result<(), DomainError> { Ok(()) }
+> }
+> ```
+>
+> For **sync** traits without RPIT (e.g. a `TokenService`), `automock` works normally:
+> ```rust
+> #[cfg_attr(test, mockall::automock)]
+> pub trait TokenService: Send + Sync + 'static {
+>     fn generate_token(&self, user_id: Uuid) -> Result<String, DomainError>;
+> }
+> // MockTokenService is auto-generated — use it as usual in tests
+> ```
+
 `#[cfg_attr(test, mockall::automock)]` on the outbound port generates `MockOrderRepository`.
-Requires `mockall ≥ 0.12` for native async fn + RPITIT support.
+Requires `mockall ≥ 0.12` for native async fn support.
 
 ```toml
 # domain/Cargo.toml

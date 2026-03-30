@@ -34,6 +34,20 @@ pub struct AppState<R: AppRepository> {
 }
 ```
 
+> **When the application also has an auth/token service** (a domain port implemented in `app`
+> but not in `outbound`), extend the type params:
+>
+> ```rust
+> // Two-generic variant — use when a TokenService is a separate domain port
+> pub struct AppState<TS: TokenService, R: AppRepository> {
+>     pub token_service: TS,
+>     pub repository: R,
+> }
+> ```
+>
+> Handlers then receive `web::Data<AppState<TS, R>>` and the JWT extractor reads from
+> `state.token_service`. See the **JWT extractor** section below.
+
 ### `inbound/src/lib.rs`
 
 ```rust
@@ -58,37 +72,27 @@ use super::dto::OrderResponse;
 pub async fn get_order<R: AppRepository>(
     path: web::Path<Uuid>,
     state: web::Data<AppState<R>>,
-) -> impl Responder {
-    match orders::get_order(&state.repo, *path).await {
-        Ok(order)                           => HttpResponse::Ok().json(OrderResponse::from(order)),
-        Err(DomainError::OrderNotFound(_))  => HttpResponse::NotFound().finish(),
-        Err(_)                              => HttpResponse::InternalServerError().finish(),
-    }
+) -> Result<impl Responder, ApiError> {
+    // `?` converts DomainError via From<DomainError> for ApiError
+    let order = orders::get_order(&state.repo, *path).await?;
+    Ok(HttpResponse::Ok().json(OrderResponse::from(order)))
 }
 
 #[post("/{id}/confirm")]
 pub async fn confirm_order<R: AppRepository>(
     path: web::Path<Uuid>,
     state: web::Data<AppState<R>>,
-) -> impl Responder {
-    match orders::confirm_order(&state.repo, *path).await {
-        Ok(order)                                        => HttpResponse::Ok().json(OrderResponse::from(order)),
-        Err(DomainError::InvalidStatusTransition)        => HttpResponse::UnprocessableEntity().finish(),
-        Err(DomainError::OrderNotFound(_))               => HttpResponse::NotFound().finish(),
-        Err(_)                                           => HttpResponse::InternalServerError().finish(),
-    }
+) -> Result<impl Responder, ApiError> {
+    let order = orders::confirm_order(&state.repo, *path).await?;
+    Ok(HttpResponse::Ok().json(OrderResponse::from(order)))
 }
 
 #[get("")]
 pub async fn list_orders<R: AppRepository>(
     state: web::Data<AppState<R>>,
-) -> impl Responder {
-    match orders::list_orders(&state.repo).await {
-        Ok(orders) => HttpResponse::Ok().json(
-            orders.map(OrderResponse::from).collect::<Vec<_>>(),
-        ),
-        Err(_) => HttpResponse::InternalServerError().finish(),
-    }
+) -> Result<impl Responder, ApiError> {
+    let orders = orders::list_orders(&state.repo).await?;
+    Ok(HttpResponse::Ok().json(orders.map(OrderResponse::from).collect::<Vec<_>>()))
 }
 ```
 
@@ -146,6 +150,20 @@ pub struct CreateOrderRequest {
 ```
 
 DTOs must **never** expose domain types directly in their fields. Map at the boundary.
+
+> **Preferred layout: co-locate with handlers** (per-bounded-context)
+>
+> Instead of a top-level `dto.rs`, place request and response types alongside the handlers
+> that use them. This keeps each bounded context self-contained:
+>
+> ```
+> inbound/src/http/
+> └── orders/
+>     ├── mod.rs          # configure fn
+>     ├── handler.rs      # handler fns
+>     ├── payload.rs      # Deserialize request structs + Validate
+>     └── response.rs     # Serialize response structs + From<DomainType>
+> ```
 
 ### `inbound/Cargo.toml`
 
@@ -295,6 +313,73 @@ impl From<DomainError> for ApiError {
 ```
 
 Handlers return `Result<impl Responder, ApiError>`; `?` converts `DomainError` via `From`.
+
+### JWT extractor (`FromRequest`)
+
+When JWT authentication is required, implement a typed `FromRequest` extractor that validates
+the token against the `TokenService` port:
+
+```rust
+// inbound/src/http/middleware/auth.rs
+use actix_web::{web, FromRequest, HttpRequest};
+use actix_web::dev::Payload;
+use actix_web::http::header;
+use domain::{model::TokenClaims, ports::{AppRepository, TokenService}};
+use std::{future::ready, marker::PhantomData};
+use crate::config::AppState;
+use crate::http::error::ApiError;
+
+/// Typed extractor — parameterised so it can access `AppState<TS, R>` from app_data.
+/// Handlers receive `claims: JwtClaims<TS, R>` and access the inner value as `claims.0`.
+#[derive(Debug)]
+pub struct JwtClaims<TS: TokenService, R: AppRepository>(
+    pub TokenClaims,
+    PhantomData<(TS, R)>,  // carries type params without storing values
+);
+
+impl<TS: TokenService + 'static, R: AppRepository + 'static> FromRequest
+    for JwtClaims<TS, R>
+{
+    type Error = actix_web::Error;
+    type Future = std::future::Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
+        let state = req.app_data::<web::Data<AppState<TS, R>>>()
+            .expect("AppState not registered");
+        let auth_header = match req.headers().get(header::AUTHORIZATION) {
+            Some(v) => v.to_str().unwrap_or_default(),
+            None    => return ready(Err(actix_web::error::ErrorUnauthorized("missing token"))),
+        };
+        if !auth_header.starts_with("Bearer ") {
+            return ready(Err(actix_web::error::ErrorUnauthorized("invalid scheme")));
+        }
+        let token = &auth_header[7..];
+        match state.token_service.verify_token(token) {
+            Ok(claims) => ready(Ok(JwtClaims(claims, PhantomData))),
+            Err(_)     => ready(Err(actix_web::error::ErrorUnauthorized(
+                ApiError::from(domain::error::DomainError::InvalidToken),
+            ))),
+        }
+    }
+}
+```
+
+Usage in a protected handler:
+
+```rust
+pub async fn get_my_orders<TS: TokenService, R: AppRepository>(
+    state:  web::Data<AppState<TS, R>>,
+    claims: JwtClaims<TS, R>,           // 401 returned automatically if missing/invalid
+) -> Result<impl Responder, ApiError> {
+    let orders = orders::list_for_user(&state.repository, claims.0.sub).await?;
+    Ok(HttpResponse::Ok().json(orders.map(OrderResponse::from).collect::<Vec<_>>()))
+}
+```
+
+> `TokenService::verify_token` is **synchronous** — `from_request` returns `Ready<…>`,
+> requiring no async machinery. Only use `async` extractors when IO is needed.
+
+---
 
 ### Module layout
 

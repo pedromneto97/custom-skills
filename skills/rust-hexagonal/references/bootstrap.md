@@ -13,6 +13,7 @@ The composition is split across three files in `app/src/`:
 | `config.rs` | Read env vars into a typed config struct |
 | `state.rs` | Build `web::Data<Service>` per bounded context from config |
 | `main.rs` | Wire state into actix-web, bind, and serve |
+| `core/` | Infrastructure services that implement domain ports but live in `app` (e.g. `JwtTokenService`) |
 
 ---
 
@@ -72,46 +73,32 @@ pub async fn build_state(cfg: &AppConfig) -> anyhow::Result<AppStateImpl> {
 ## `app/src/main.rs` (actix-web — preferred)
 
 ```rust
-mod config;
-mod state;
-
-use actix_web::{web, App, HttpServer};
-use config::AppConfig;
-use outbound::db::SeaOrmOrderRepository;
-use inbound::http::router::order_routes;
+// Global allocator swap — recommended for production long-running services.
+// jemallocator reduces fragmentation under high concurrent load.
+#[global_allocator]
+static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[actix_web::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
-    let cfg        = AppConfig::from_env()?;
-    let state      = state::build_state(&cfg).await?;
-    let state_data = web::Data::new(state);
+    let db = outbound::AppDatabase::new().await; // process::exit(1) on connect failure
+    db.run_migrations().await;                   // process::exit(1) on migration failure
 
-    HttpServer::new(move || {
-        App::new()
-            .app_data(state_data.clone())
-            // Turbofish names the concrete R; only required when inference fails.
-            .configure(order_routes::<SeaOrmOrderRepository>)
-    })
-    .bind((cfg.host.as_str(), cfg.port))?
-    .run()
-    .await?;
-
-    Ok(())
+    let state = AppState::<core::auth::JwtTokenService, outbound::AppDatabase> {
+        token_service: core::auth::JwtTokenService::new(),
+        repository: db,
+    };
+    inbound::run(state).await
 }
 ```
 
-Handlers in `inbound` remain generic and receive `web::Data<AppState<R>>`:
-```rust
-// inbound/src/http/orders.rs
-pub async fn get_order<R: AppRepository>(
-    path: web::Path<Uuid>,
-    state: web::Data<AppState<R>>,   // ← actix extracts from type map
-) -> impl Responder { ... }
-```
-```
+> **`process::exit(1)` on fatal infra errors** (DB connect failure, migration failure) is
+> intentional. These conditions are unrecoverable at startup; logging the error and exiting
+> immediately is clearer than propagating through `anyhow` or panicking with a backtrace.
 
 ---
 
@@ -148,9 +135,9 @@ async fn main() -> anyhow::Result<()> {
 
 ```toml
 [package]
-name = "app"
+name    = "app"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "server"
@@ -162,10 +149,11 @@ inbound.workspace   = true
 outbound.workspace  = true
 migration.workspace = true
 tokio.workspace     = true
-anyhow.workspace    = true
 # layer-specific — not in workspace
-actix-web          = "4"          # or axum = "0.8"
-sea-orm            = { version = "2", features = ["sqlx-postgres", "runtime-tokio-rustls"] }
+actix-web          = "4"              # or axum = "0.8"
+jemallocator       = "0.5"            # recommended: reduce fragmentation under load
 dotenvy            = "0.15"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# Only if JwtTokenService (or similar infra service) lives in app/src/core/:
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 ```

@@ -92,6 +92,98 @@ pub trait OrderRepository {
 
 ---
 
+### `ports/mod.rs` — combining multiple traits into a supertrait
+
+When the application has two or more port traits (e.g. `AuthRepository` + `CustomerRepository`),
+combine them in `domain/src/ports/mod.rs` so that all layers share a single bound:
+
+```rust
+// domain/src/ports/mod.rs
+mod auth;
+mod customer;
+
+pub use auth::AuthRepository;
+pub use customer::CustomerRepository;
+
+/// Supertrait — the single outbound adapter implements this.
+/// `ping` gives health-check ability without a separate port.
+pub trait AppRepository: AuthRepository + CustomerRepository + Send + Sync + 'static {
+    async fn ping(&self) -> bool;
+}
+
+// Conditionally re-export mocks so domain tests can import them directly.
+#[cfg(test)]
+pub use auth::MockAuthRepository;  // fine: AuthRepository has no RPIT methods
+```
+
+The outbound adapter implements each trait separately, then satisfies the supertrait:
+
+```rust
+impl AuthRepository for AppDatabase { /* … */ }
+impl CustomerRepository for AppDatabase { /* … */ }
+impl AppRepository for AppDatabase {
+    async fn ping(&self) -> bool { self.connection.ping().await.is_ok() }
+}
+```
+
+> **Why in `domain` not `inbound`?** Placing the supertrait in `domain` means `outbound` satisfies
+> it without importing anything from `inbound`, preserving the one-way dependency rule.
+
+---
+
+### mockall limitation — RPIT return types
+
+`#[cfg_attr(test, mockall::automock)]` **cannot** be placed on a trait containing a method that
+returns `impl Trait` in return position, e.g.:
+
+```rust
+// ❌ Will NOT compile with #[automock]
+async fn find_all(&self) -> Result<impl Iterator<Item = Order>, DomainError>;
+```
+
+**Rule:** Only apply `automock` to traits whose every method has a concrete return type.
+For RPIT traits, write a hand-written fake in a `#[cfg(test)]` module:
+
+```rust
+// domain/src/ports/outbound.rs
+// Note: no #[cfg_attr(test, mockall::automock)] here
+pub trait OrderRepository: Send + Sync + 'static {
+    async fn find_by_id(&self, id: Uuid) -> Result<Order, DomainError>;
+    async fn find_all(&self) -> Result<impl Iterator<Item = Order>, DomainError>; // RPIT
+    async fn save(&self, order: &Order) -> Result<(), DomainError>;
+}
+
+#[cfg(test)]
+pub struct FakeOrderRepository {
+    pub orders: Vec<Order>,
+}
+
+#[cfg(test)]
+impl OrderRepository for FakeOrderRepository {
+    async fn find_by_id(&self, id: Uuid) -> Result<Order, DomainError> {
+        self.orders.iter().find(|o| o.id.0 == id)
+            .cloned()
+            .ok_or(DomainError::OrderNotFound(id))
+    }
+    async fn find_all(&self) -> Result<impl Iterator<Item = Order>, DomainError> {
+        Ok(self.orders.clone().into_iter()) // concrete type — compiles correctly
+    }
+    async fn save(&self, _o: &Order) -> Result<(), DomainError> { Ok(()) }
+}
+```
+
+For sync traits **without** RPIT, `automock` works as usual:
+
+```rust
+#[cfg_attr(test, mockall::automock)]
+pub trait TokenService: Send + Sync + 'static {
+    fn generate_token(&self, user_id: Uuid) -> Result<String, DomainError>; // concrete ✓
+    fn verify_token(&self, token: &str)      -> Result<TokenClaims, DomainError>;
+}
+```
+
+---
+
 ## Step 4: Use Case Functions
 
 Each use case is a plain exported async function in `domain/src/use_cases/`. The repository
@@ -132,9 +224,11 @@ pub async fn list_orders<R: OrderRepository>(
 ## `domain/src/lib.rs`
 
 ```rust
+#![allow(async_fn_in_trait)] // Rust ≥ 1.75 — no `async-trait` crate needed
+
 pub mod error;
 pub mod model;
-pub mod ports; // only contains outbound now
+pub mod ports;
 pub mod use_cases;
 ```
 

@@ -87,6 +87,7 @@ See [folder structure & Cargo.toml templates](./references/folder-structure.md).
 | Prefer **static dispatch** (generics); use `Arc<dyn Trait>` only when runtime polymorphism is needed | Zero-cost unless you opt in |
 | No `async-trait` unless you need `dyn Trait` object safety | Native async fn in traits (Rust ≥ 1.75) |
 | `app/main.rs` is the only file importing all concrete types | Single composition root |
+| `AppRepository` supertrait may live in `domain/ports/mod.rs` when ≥ 2 port traits exist | Keeps the combined bound in domain; outbound never needs to import inbound |
 
 ---
 
@@ -143,6 +144,7 @@ See [testing reference](./references/testing.md).
 - **Cross-adapter coupling** — `inbound` and `outbound` must not import each other; enforced by their `Cargo.toml`.
 - **Handler holding a concrete service type** — `web::Data<OrderService<PgRepo>>` leaks the concrete type. Use `web::Data<AppState<R>>` where `R: AppRepository` to keep the adapter generic.
 - **Unnecessary `async-trait`** — only add it when you need `dyn Trait`. With static dispatch and Rust ≥ 1.75, remove it from port traits.
+- **`mockall::automock` on RPIT traits** — `#[automock]` compile-errors when a trait method returns `impl Trait` in return position (e.g. `async fn find_all() -> Result<impl Iterator<Item = T>, _>`). Only annotate traits with concrete return types. For RPIT traits write a hand-written fake struct in a `#[cfg(test)]` block — see [testing reference](./references/testing.md).
 - **Returning `Vec<T>` from collection ports** — prefer `impl Iterator<Item = T>`; the adapter collects from DB internally but the interface stays flexible.
 - **Leaking SeaORM types into domain** — `Model`, `ActiveModel`, column enums belong in `outbound/src/db/`. Map to domain structs in `mappers.rs` immediately.
 - **Bloated `app/main.rs`** — extract `fn wire_orders(db)` helpers per bounded context; keep `main` under ~30 lines.
