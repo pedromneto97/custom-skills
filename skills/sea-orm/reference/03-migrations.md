@@ -24,10 +24,11 @@ migration/
 [dependencies.sea-orm-migration]
 version = "2.0.0-rc"
 features = ["runtime-tokio-rustls", "sqlx-postgres"]   # match main crate
-
-[dependencies]
-async-std = { version = "1", features = ["attributes", "tokio1"] }
+# async-std is NOT needed — sea-orm-migration supports tokio natively
 ```
+
+> **MySQL note:** change the feature flag to `"sqlx-mysql"` for MySQL/MariaDB.
+> Use `"sqlx-sqlite"` for SQLite.
 
 ## `migration/src/lib.rs`
 ```rust
@@ -102,11 +103,45 @@ enum Post {
 
 ## Schema helper functions (`schema::*`)
 ```rust
-pk_auto(col)           // PK + auto-increment (IDENTITY on MSSQL)
-string(col)            // VARCHAR(255) / nvarchar(255) on MSSQL
-string_null(col)       // nullable VARCHAR
-integer(col)           // INT
-integer_null(col)      // nullable INT
+pk_auto(col)                     // PK + auto-increment (IDENTITY on MSSQL)
+big_integer(col)                 // BIGINT
+big_integer_null(col)            // nullable BIGINT
+string(col)                      // VARCHAR(255) / nvarchar(255) on MSSQL
+string_len(col, 100)             // VARCHAR(100)
+string_len_null(col, 100)        // nullable VARCHAR(100)
+string_len_uniq(col, 320)        // VARCHAR(320) UNIQUE
+integer(col)                     // INT
+integer_null(col)                // nullable INT
+boolean(col)                     // BOOLEAN / TINYINT(1)
+timestamp(col)                   // TIMESTAMP (without time zone)
+
+// MySQL ENUM column
+enumeration(col, Alias::new("role"), [Role::Owner, Role::Admin, Role::Operator])
+
+// Default value
+string(Users::Name).default(Expr::value("anonymous"))
+timestamp(Orders::CreatedAt).default(Expr::current_timestamp())
+boolean(Stores::Active).default(Expr::value(true))
+```
+
+### Named foreign keys and indexes (recommended — aids debugging)
+
+```rust
+ForeignKey::create()
+    .name("fk-order_items-order_id")
+    .from(OrderItems::Table, OrderItems::OrderId)
+    .to(Orders::Table, Orders::Id)
+    .on_delete(ForeignKeyAction::Cascade)
+    .to_owned()
+
+Index::create()
+    .name("idx-store_users-store_id-user_id")
+    .table(StoreUsers::Table)
+    .col(StoreUsers::StoreId)
+    .col(StoreUsers::UserId)
+    .unique()
+    .if_not_exists()
+    .to_owned()
 ```
 
 ## SchemaManager DDL API

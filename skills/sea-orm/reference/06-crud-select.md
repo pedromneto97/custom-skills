@@ -109,6 +109,39 @@ let rows = cake_filling::Entity::find()
     .await?;
 ```
 
+## Custom join projection (`FromQueryResult`)
+
+When a query joins tables and you only need a subset of columns from multiple entities,
+define a projection struct with `#[derive(sea_orm::FromQueryResult)]`:
+
+```rust
+use sea_orm::{FromQueryResult, JoinType, QuerySelect, RelationTrait};
+
+#[derive(Debug, sea_orm::FromQueryResult)]
+struct OrderSummaryRow {
+    order_id:    i64,
+    customer_id: i64,
+    store_name:  String, // from a joined table
+}
+
+let rows: Vec<OrderSummaryRow> = order::Entity::find()
+    .join(JoinType::InnerJoin, order::Relation::Store.def())
+    .select_only()
+    .column_as(order::Column::Id,         "order_id")
+    .column_as(order::Column::CustomerId,  "customer_id")
+    .column_as(store::Column::Name,        "store_name")
+    .into_model::<OrderSummaryRow>()
+    .all(&db)
+    .await?;
+
+let domain_summaries: Vec<OrderSummary> = rows.into_iter().map(|r| r.into()).collect();
+```
+
+> Use `column_as(Column, "alias")` when the projection field name differs from the column name
+> or when disambiguating columns from multiple tables.
+
+---
+
 ## Partial model (select subset of columns)
 ```rust
 #[derive(DerivePartialModel)]

@@ -85,6 +85,45 @@ let res = entity::Entity::insert_many(items)
 assert!(matches!(res, Ok(TryInsertResult::Conflicted)));
 ```
 
+## Transactions
+
+```rust
+use sea_orm::{TransactionTrait, TransactionError};
+
+// Closure receives &txn — use it in place of &db for all queries inside the transaction.
+// Type params: <_, ReturnType, ErrorType>
+let result = db.transaction::<_, (User, Order), DomainError>(|txn| {
+    Box::pin(async move {
+        let user: User = user::ActiveModel { name: Set("Alice".into()), ..Default::default() }
+            .insert(txn).await
+            .map_err(|e| DomainError::Infrastructure(e.to_string()))?
+            .into();
+
+        let order: Order = order::ActiveModel {
+            user_id: Set(user.id),
+            ..Default::default()
+        }
+        .insert(txn).await
+        .map_err(|e| DomainError::Infrastructure(e.to_string()))?
+        .into();
+
+        Ok((user, order))
+    })
+})
+.await
+.map_err(|err| match err {
+    TransactionError::Transaction(domain_err) => domain_err,        // error from inside the closure
+    TransactionError::Connection(_)           => DomainError::Infrastructure("db".into()),
+})?;
+```
+
+> **Duplicate-key errors inside a transaction:** map the `DbErr` to the appropriate domain
+> error *before* returning from the closure — e.g. inspect the error message for
+> `"Duplicate entry"` (MySQL) or `"duplicate key value"` (Postgres) and map to a
+> conflict variant.
+
+---
+
 ## MSSQL — Explicit PK (IDENTITY_INSERT automatic in SeaORM-X)
 ```rust
 // SeaORM-X wraps in SET IDENTITY_INSERT ON/OFF automatically when id is Set(...)

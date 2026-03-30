@@ -1,5 +1,67 @@
 # SeaORM v2 — Entity Structure
 
+## MySQL / Postgres ENUM column
+
+Map a database-native ENUM type to a Rust enum using `DeriveActiveEnum`:
+
+```rust
+use sea_orm::{DeriveActiveEnum, EnumIter};
+
+#[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Copy)]
+#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "role")]
+pub enum Role {
+    #[sea_orm(string_value = "owner")]    Owner,
+    #[sea_orm(string_value = "admin")]    Admin,
+    #[sea_orm(string_value = "operator")] Operator,
+}
+```
+
+- `rs_type = "String"` — the Rust representation used in serialization  
+- `db_type = "Enum"` — maps to a native MySQL/Postgres ENUM column  
+- `enum_name` must match the enum type name in the DB schema  
+- For Postgres, use `db_type = "PgEnum"`
+
+---
+
+## Custom join projection (`FromQueryResult`)
+
+When a query joins multiple tables and you need a partial row, define a projection struct:
+
+```rust
+use sea_orm::FromQueryResult;
+
+#[derive(Debug, sea_orm::FromQueryResult)]
+pub struct OrderSummaryRow {
+    pub order_id:   i64,
+    pub store_name: String, // from joined table
+    pub role:       Role,   // projected column mapped via DeriveActiveEnum
+}
+```
+
+Used with `.into_model::<OrderSummaryRow>()` in a select query — see `06-crud-select.md`.
+
+---
+
+## Dense model with inline relation (`has_many`)
+
+In the v2 `#[sea_orm::model]` dense format, declare relations directly on the struct:
+
+```rust
+#[sea_orm::model]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[sea_orm(table_name = "stores")]
+pub struct Model {
+    #[sea_orm(primary_key)]
+    pub id: i64,
+    pub name: String,
+    #[sea_orm(has_many)]
+    pub orders: HasMany<super::order::Entity>, // declare here; no separate Relation enum needed
+}
+impl ActiveModelBehavior for ActiveModel {}
+```
+
+---
+
 ## v2 — Dense format (recommended — enables COLUMN, find_by_*, ModelEx)
 ```rust
 use sea_orm::entity::prelude::*;
