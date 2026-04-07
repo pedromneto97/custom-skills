@@ -12,6 +12,7 @@ GitHub Copilot skills for Rust backend development, providing production-ready p
 | `crypto-best-practices` | Cryptographic operations and security best practices for Rust: password hashing, encryption algorithms, key management, secure authentication patterns, and common pitfalls to avoid. | Authentication & encryption |
 | `flutter-data-layer` | Flutter data-layer patterns and templates for repositories, datasources, models, and response mapping. **Refs:** datasource, model, templates. | Flutter app data layer |
 | `flutter-domain-layer` | Domain/core layer guidance for Flutter Clean Architecture: entities, value objects, repository interfaces (ports), use cases, and domain exceptions. **Refs:** references, templates. | Flutter app domain layer |
+| `flutter-presentation-layer` | Opinionated conventions for the presentation layer in Flutter Clean Architecture: per-page folders, single-responsibility cubits (one cubit per fetch/post/delete), close-to-use widget placement, clean `build()` patterns (extract methods/widgets), and enforced localization for strings. **Refs:** presentation-templates, checklist. | Building Flutter UI and state (pages & cubits) |
 
 
 
