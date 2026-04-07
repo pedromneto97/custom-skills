@@ -11,6 +11,7 @@ GitHub Copilot skills for Rust backend development, providing production-ready p
 | `sea-orm` | SeaORM v2 database patterns for Rust (Postgres, MySQL, SQLite, with SeaORM-X for MSSQL). Covers setup, migrations, entity generation, CRUD operations, pagination, relationship handling, transaction management, and on-conflict/upsert strategies. **Refs:** 01-cargo-setup, 02-connection, 03-migrations, 04-entity-structure, 05-crud-insert, 06-crud-select, 07-crud-update-delete, 08-mssql-features, 09-v1-v2-migration. | SeaORM database work |
 | `crypto-best-practices` | Cryptographic operations and security best practices for Rust: password hashing, encryption algorithms, key management, secure authentication patterns, and common pitfalls to avoid. | Authentication & encryption |
 | `flutter-data-layer` | Flutter data-layer patterns and templates for repositories, datasources, models, and response mapping. **Refs:** datasource, model, templates. | Flutter app data layer |
+| `flutter-domain-layer` | Domain/core layer guidance for Flutter Clean Architecture: entities, value objects, repository interfaces (ports), use cases, and domain exceptions. **Refs:** references, templates. | Flutter app domain layer |
 
 
 
