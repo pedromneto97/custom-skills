@@ -13,6 +13,7 @@ Principles
 - Widgets live as close as possible to where they're used. Only genuinely shared components go into a global `widgets` folder.
 - Keep `build()` methods clean: extract widget-building functions into private class methods or small private widgets.
 - All user-facing strings must come from the localization system (ARB, `S`, `AppLocalizations`, etc.).
+- For CRUD-like flows, split by intent explicitly: one cubit to list items, one to add/create item, one to delete item, and one to remove item from a local collection/state (if this action differs from backend delete).
 
 Folder layout (recommended)
 
@@ -44,6 +45,21 @@ Cubit conventions
 Examples:
 - `user_list_cubit` — only responsible for fetching the list of users.
 - `user_create_cubit` — only responsible for sending a create-user request and reporting success/failure.
+- `item_list_cubit` — only responsible for listing items.
+- `item_add_cubit` — only responsible for adding a new item.
+- `item_delete_cubit` — only responsible for deleting an item in the backend/source of truth.
+- `item_remove_cubit` — only responsible for removing an item from current UI state/local cache when modeled as a distinct action.
+
+Practical SRP split for Cubits
+
+When the page supports multiple intents, avoid a “god cubit”. Prefer one cubit per intent:
+
+- `ListItemsCubit`: loads and refreshes item collections.
+- `AddItemCubit`: handles create/add submission flow.
+- `DeleteItemCubit`: executes delete use case against remote/local source of truth.
+- `RemoveItemCubit`: removes an element from an in-memory list/UI state when this is a separate intent from delete.
+
+This separation keeps each cubit focused, easier to test, and aligned with the Single Responsibility Principle (SRP).
 
 Widget placement and composition
 
