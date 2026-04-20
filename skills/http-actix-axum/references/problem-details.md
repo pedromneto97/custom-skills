@@ -258,6 +258,67 @@ body.validate().map_err(|e| {
 
 ---
 
+## Framework extractor errors → Problem Details
+
+Validation and domain errors are only part of the picture. Parsing/extractor errors should also
+be normalized to Problem Details with safe `detail` fields.
+
+### actix-web: JSON and query extractor hooks
+
+```rust
+use actix_web::{error::{JsonPayloadError, QueryPayloadError}, HttpRequest};
+
+pub fn json_payload_error_handler(err: JsonPayloadError, _req: &HttpRequest) -> actix_web::Error {
+    let (status, title) = match err {
+        JsonPayloadError::OverflowKnownLength { .. } | JsonPayloadError::Overflow { .. } => (413, "Payload Too Large"),
+        JsonPayloadError::Serialize(_) => (500, "Internal Server Error"),
+        _ => (400, "Bad Request"),
+    };
+
+    ApiError(ProblemDetail::blank(status, title, "Invalid JSON payload")).into()
+}
+
+pub fn query_payload_error_handler(err: QueryPayloadError, _req: &HttpRequest) -> actix_web::Error {
+    let detail = match err {
+        QueryPayloadError::Deserialize(_) => "Invalid query parameter",
+        _ => "Bad request",
+    };
+    ApiError(ProblemDetail::blank(400, "Bad Request", detail)).into()
+}
+```
+
+Register in app setup:
+
+```rust
+.app_data(JsonConfig::default().error_handler(json_payload_error_handler))
+.app_data(QueryConfig::default().error_handler(query_payload_error_handler))
+```
+
+### axum: extractor rejection mapping
+
+```rust
+use axum::extract::rejection::{JsonRejection, QueryRejection};
+
+fn map_json_rejection(err: JsonRejection) -> ApiError {
+    match err {
+        JsonRejection::JsonDataError(_) | JsonRejection::JsonSyntaxError(_) =>
+            ApiError(ProblemDetail::blank(400, "Bad Request", "Invalid JSON payload")),
+        JsonRejection::BytesRejection(_) =>
+            ApiError(ProblemDetail::blank(413, "Payload Too Large", "Request body too large")),
+        _ => ApiError(ProblemDetail::blank(400, "Bad Request", "Invalid request body")),
+    }
+}
+
+fn map_query_rejection(_: QueryRejection) -> ApiError {
+    ApiError(ProblemDetail::blank(400, "Bad Request", "Invalid query parameter"))
+}
+```
+
+Return these mapped errors from handlers (or central middleware/layer) so clients always get
+`application/problem+json` responses.
+
+---
+
 ## Cargo.toml
 
 ```toml

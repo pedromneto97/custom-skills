@@ -13,6 +13,11 @@
 > **Critical:** Never combine `allow_any_origin()` with `allow_credentials(true)`.
 > The CORS spec forbids it; browsers will refuse the response.
 
+Credentialed browser flows require coordinated settings:
+- CORS: explicit origins + credentials enabled.
+- Cookies/session: `Secure`, `HttpOnly`, explicit domain/path, and appropriate `SameSite` mode.
+- Frontend requests: send credentials (`fetch(..., { credentials: "include" })`).
+
 ---
 
 ## actix-web — `actix-cors`
@@ -63,6 +68,19 @@ let cors = Cors::default()
 App::new()
     .wrap(cors)
     // ...
+```
+
+Runtime origin from configuration:
+
+```rust
+let allowed_origin = std::env::var("ORIGIN").expect("ORIGIN must be set");
+
+let cors = Cors::default()
+    .allowed_origin(&allowed_origin)
+    .allow_any_method()
+    .allow_any_header()
+    .supports_credentials()
+    .max_age(3600);
 ```
 
 > Wrap CORS **before** other middleware — actix-web middleware executes in reverse registration order.
@@ -153,3 +171,6 @@ let cors = CorsLayer::new()
     .allow_credentials(true)
     // ...
 ```
+
+When multiple deployment environments exist (local/staging/prod), keep the allowlist in config,
+not hardcoded in handlers or routers.

@@ -101,6 +101,27 @@ where
 }
 ```
 
+### actix-web — `DefaultHeaders` (simpler option)
+
+```rust
+use actix_web::middleware::DefaultHeaders;
+
+App::new()
+    .wrap(
+        DefaultHeaders::new()
+            .add(("X-Content-Type-Options", "nosniff"))
+            .add(("X-Frame-Options", "DENY"))
+            .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
+            .add(("Content-Security-Policy", "default-src 'self'"))
+            .add(("Permissions-Policy", "geolocation=(), microphone=(), camera=()")),
+    )
+```
+
+Use custom middleware when you need conditional behavior; use `DefaultHeaders` for fixed policy.
+
+> Middleware ordering matters. In actix-web, middleware executes in reverse registration order.
+> Register security headers so they apply to all routes and error responses.
+
 ### Wire in `HttpServer`
 
 ```rust

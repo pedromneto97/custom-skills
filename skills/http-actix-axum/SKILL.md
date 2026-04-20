@@ -4,7 +4,8 @@ description: >
   HTTP best practices for actix-web 4 and axum 0.7+ Rust backends.
   Use when: naming REST resources, choosing HTTP status codes, implementing RFC 9457 Problem Details
   error responses, configuring OWASP security headers, setting up CORS, enabling response
-  compression, versioning APIs, or structuring the HTTP layer. Covers both actix-web and axum.
+    compression, versioning APIs, implementing custom request extractors, wiring OpenAPI docs,
+    or structuring the HTTP layer. Covers both actix-web and axum.
 argument-hint: 'Specify the framework (actix-web or axum) and the topic, e.g. "CORS for axum" or "error handling with Problem Details for actix-web"'
 ---
 
@@ -100,6 +101,7 @@ Quick rules:
 - `Content-Type: application/problem+json`
 - `type` is a URI; use `"about:blank"` when no dedicated error page exists
 - Never expose stack traces, internal IDs, or DB details in `detail`
+- Convert framework extractor errors (JSON/query/path) into sanitized Problem Details
 
 ---
 
@@ -135,6 +137,9 @@ Decision guide:
 | Cookie-auth / credentialed | Explicit origin allowlist + `allow_credentials(true)` |
 
 > **Never** combine `allow_any_origin()` with `allow_credentials(true)` — browsers reject it.
+
+For cookie/session auth, combine CORS policy with cookie security (`Secure`, `HttpOnly`,
+`SameSite`) and an explicit origin allowlist.
 
 ---
 
@@ -176,6 +181,24 @@ pub async fn create_order<R: AppRepository>(
         .json(OrderResponse::from(order)))
 }
 ```
+
+---
+
+## 9. Custom Extractors
+
+Use typed request extractors (`FromRequest` in actix-web, `FromRequestParts` in axum) for
+cross-cutting concerns like auth claims, tenant context, and request-scoped metadata.
+
+→ Read [`references/extractors.md`](./references/extractors.md).
+
+---
+
+## 10. OpenAPI / Swagger
+
+Keep handlers transport-focused and annotate route contracts where possible.
+Expose docs routes conditionally (often only in non-production/debug builds).
+
+→ Read [`references/openapi.md`](./references/openapi.md).
 
 **Domain-validation bridge** (when domain owns the rules):
 ```rust
