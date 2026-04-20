@@ -27,12 +27,14 @@ argument-hint: 'Describe the task, e.g. "set up migrations for MSSQL", "insert m
 | CRUD Update & Delete — update one/many, delete one/many, `exec_with_returning` | `reference/07-crud-update-delete.md` |
 | MSSQL-specific — savepoints, IDENTITY_INSERT, OUTPUT, schema rewrite, tuple IN | `reference/08-mssql-features.md` |
 | v1 → v2 breaking changes | `reference/09-v1-v2-migration.md` |
+| Repository boundary patterns — mappers, transactions, infra→domain error mapping | `reference/10-repository-patterns.md` |
 
 ## Quick decision guide
 
 - **Starting a new project?** → load `01-cargo-setup.md` + `02-connection.md` + `03-migrations.md`
 - **Defining entities?** → load `04-entity-structure.md`
 - **Writing queries?** → load the relevant CRUD file(s): `05`, `06`, or `07`
+- **Implementing repositories?** → load `10-repository-patterns.md` (+ relevant CRUD file)
 - **Using MSSQL / SeaORM-X?** → always also load `08-mssql-features.md`
 - **Upgrading from v1?** → load `09-v1-v2-migration.md`
 

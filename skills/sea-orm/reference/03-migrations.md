@@ -19,6 +19,20 @@ migration/
     └── m20220101_000001_create_post.rs
 ```
 
+Some workspaces name this crate `migrations/` instead of `migration/`. Both are valid.
+
+## Naming conventions
+
+Use timestamp + action naming to keep history readable and deterministic:
+
+```text
+m20260412_150756_add_user_profile_name.rs
+m20260420_090000_create_orders_table.rs
+m20260421_101500_add_unique_index_orders_reference.rs
+```
+
+Prefer explicit names for indexes and foreign keys so production errors are easier to trace.
+
 ## `migration/Cargo.toml`
 ```toml
 [dependencies.sea-orm-migration]
@@ -143,6 +157,12 @@ Index::create()
     .if_not_exists()
     .to_owned()
 ```
+
+For teams that standardize names, these prefixes are common:
+- `pk-...` primary keys
+- `fk-...` foreign keys
+- `idx-...` non-unique indexes
+- `uq-...` unique indexes/constraints
 
 ## SchemaManager DDL API
 ```rust

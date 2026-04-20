@@ -20,6 +20,8 @@ println!("{}", res.last_insert_id);
 let res: InsertResult = fruit::Entity::insert_many([apple, orange]).exec(db).await?;
 ```
 
+Useful for initialization flows where one transaction creates a root record and related defaults.
+
 ## Insert many — empty guard
 ```rust
 let res = Bakery::insert_many(std::iter::empty())
@@ -117,10 +119,34 @@ let result = db.transaction::<_, (User, Order), DomainError>(|txn| {
 })?;
 ```
 
+### Batch initialization inside a transaction
+
+```rust
+let user = users::ActiveModel { email: Set(email), ..Default::default() }
+    .insert(txn)
+    .await?;
+
+let defaults = vec![
+    settings::ActiveModel { user_id: Set(user.id), key: Set("theme".into()), value: Set("light".into()) },
+    settings::ActiveModel { user_id: Set(user.id), key: Set("locale".into()), value: Set("en".into()) },
+];
+
+settings::Entity::insert_many(defaults).exec(txn).await?;
+```
+
 > **Duplicate-key errors inside a transaction:** map the `DbErr` to the appropriate domain
 > error *before* returning from the closure — e.g. inspect the error message for
 > `"Duplicate entry"` (MySQL) or `"duplicate key value"` (Postgres) and map to a
 > conflict variant.
+
+```rust
+fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
+    let msg = err.to_string();
+    msg.contains("duplicate key")
+        || msg.contains("Duplicate entry")
+        || msg.contains("UNIQUE constraint failed")
+}
+```
 
 ---
 
