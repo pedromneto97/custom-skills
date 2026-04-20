@@ -1,21 +1,21 @@
 # Inbound Adapter Reference
 
 Inbound adapters translate external requests into calls to domain use case functions. They are
-**generic over `R: AppRepository`** — they never hold a concrete repository type and never
-import `outbound`.
+generic over domain port traits and never import concrete outbound adapter types.
 
-The `inbound` crate owns its own `AppRepository` supertrait and `AppState<R>` struct. Handlers
-receive `web::Data<AppState<R>>` and call free use case functions, passing `&state.repo`.
+The `inbound` crate can expose one aggregate `AppState<...>` type or accept multiple typed
+framework app-data values. Both are valid as long as handlers depend on traits, not concrete
+adapters.
 
 ---
 
 ## actix-web (preferred)
 
-### `inbound/src/state.rs`
+### `inbound/src/state.rs` (aggregate state shape)
 
 ```rust
 // inbound/src/state.rs
-use domain::ports::outbound::OrderRepository;
+use domain::ports::repository::OrderRepository;
 
 // Combines all outbound traits needed by this adapter.
 // As bounded contexts grow, add new repository supertrait variants
@@ -34,8 +34,8 @@ pub struct AppState<R: AppRepository> {
 }
 ```
 
-> **When the application also has an auth/token service** (a domain port implemented in `app`
-> but not in `outbound`), extend the type params:
+> **When the application also has non-repository ports** (token, cache, email), extend the
+> type params:
 >
 > ```rust
 > // Two-generic variant — use when a TokenService is a separate domain port
@@ -55,7 +55,7 @@ pub mod http;
 pub mod state;
 ```
 
-### Handler
+### Handler (aggregate state)
 
 ```rust
 use actix_web::{web, HttpResponse, Responder, post, get};
@@ -118,8 +118,32 @@ pub fn order_routes<R: AppRepository + 'static>(cfg: &mut web::ServiceConfig) {
 }
 ```
 
-The concrete type for `R` is only filled in at `app/main.rs` — the `inbound` crate itself
-stays generic.
+The concrete type for `R` is only filled in at `app/main.rs`.
+
+### Alternative: multiple typed app-data values
+
+Instead of one `AppState<TS, R, ...>`, handlers can receive separate typed values:
+
+```rust
+use actix_web::web;
+use domain::ports::{repository::OrderRepository, service::TokenService};
+
+pub async fn list_orders<TS, R>(
+    token_service: web::Data<TS>,
+    repository: web::Data<R>,
+) -> Result<impl Responder, ApiError>
+where
+    TS: TokenService,
+    R: OrderRepository,
+{
+    let _claims = token_service.verify_token("...")?;
+    let orders = orders::list_orders(repository.get_ref()).await?;
+    Ok(HttpResponse::Ok().json(orders.collect::<Vec<_>>()))
+}
+```
+
+Choose this shape when handlers use many independent adapters and an aggregate state would become
+too broad.
 
 ### DTOs
 
@@ -317,7 +341,8 @@ Handlers return `Result<impl Responder, ApiError>`; `?` converts `DomainError` v
 ### JWT extractor (`FromRequest`)
 
 When JWT authentication is required, implement a typed `FromRequest` extractor that validates
-the token against the `TokenService` port:
+the token against the `TokenService` port. The extractor can read either aggregate state or
+standalone app-data values.
 
 ```rust
 // inbound/src/http/middleware/auth.rs

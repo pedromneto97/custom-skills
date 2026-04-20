@@ -3,6 +3,11 @@
 Outbound adapters implement repository port traits defined in `domain`. They import `domain`
 and infrastructure crates — never `inbound`.
 
+Keep adapter boundaries explicit:
+- SeaORM entities and active models stay inside outbound.
+- Domain models cross the boundary only via mapping code (`From` impls or mapper fns).
+- `DbErr` and transport-specific failures are translated to domain errors in the adapter.
+
 ---
 
 ## Single-struct, all-ports pattern
@@ -148,9 +153,11 @@ impl ActiveModelBehavior for ActiveModel {}
 
 ## Mappers
 
-Translate between SeaORM `Model` and domain types at the repository boundary.
-Prefer `From` / `Into` impls over free functions — they integrate with Rust's type system
-(`model.into()`, `Order::from(model)`) and can be called uniformly in iterator chains.
+Translate between SeaORM `Model` and domain types at the repository boundary. Keep mapper code
+in a dedicated module (`mappers.rs`) so repositories stay focused on query logic.
+
+Prefer `From` / `Into` impls when mappings are straightforward (`model.into()`). Use explicit
+mapper functions for transformations that require validation, lossy conversion, or fallback rules.
 
 ```rust
 // outbound/src/database/mappers.rs
@@ -195,6 +202,30 @@ let row: order::Model = order_entity::Entity::find_by_id(id).one(&self.db).await
     .ok_or(DomainError::OrderNotFound(id))?;
 let domain_order: Order = row.into(); // From impl invoked here
 ```
+
+### Error mapping at the boundary
+
+Repository implementations should map infrastructure errors immediately:
+
+```rust
+fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
+    let msg = err.to_string();
+    msg.contains("duplicate key")
+        || msg.contains("Duplicate entry")
+        || msg.contains("UNIQUE constraint failed")
+}
+
+// in repository method
+.map_err(|e| {
+    if is_unique_violation(&e) {
+        return DomainError::Conflict("resource already exists".into());
+    }
+    DomainError::Infrastructure("database error".into())
+})
+```
+
+Prefer typed database error variants when available; use message fallback only for cross-database
+portability.
 
 ---
 

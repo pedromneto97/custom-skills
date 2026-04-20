@@ -16,8 +16,11 @@ my-app/
 │       │   ├── order.rs                    # Order, OrderId, OrderStatus
 │       │   └── customer.rs
 │       ├── ports/
-│       │   ├── mod.rs                      # pub trait AppRepository (supertrait combining all port traits + ping)
-│       │   └── order.rs                    # trait OrderRepository (use #[automock] only if no RPIT methods)
+│       │   ├── mod.rs                      # optional supertraits that combine multiple ports
+│       │   ├── repository/
+│       │   │   └── order.rs                # persistence ports
+│       │   └── service/
+│       │       └── token.rs                # external-service ports
 │       └── use_cases/
 │           ├── mod.rs
 │           └── order/
@@ -57,7 +60,7 @@ my-app/
 │           │   └── order.rs
 │           └── mappers.rs                  # From<entity::Model> for DomainType (and reverse for enums)
 │
-├── migration/                              # lib — DB migrations (sea-orm-cli migrate init)
+├── migration/                              # lib — DB migrations (some teams use the name migrations)
 │   ├── Cargo.toml                          # deps: sea-orm-migration only — no domain/app imports
 │   └── src/
 │       ├── lib.rs                          # Migrator struct + MigratorTrait impl
@@ -66,7 +69,7 @@ my-app/
 └── app/                                    # bin — sole composition root
     ├── Cargo.toml                          # deps: all crates above + jsonwebtoken (if JWT lives here)
     └── src/
-        ├── main.rs                         # wire AppState<JwtTokenService, AppDatabase> → inbound::run(state)
+        ├── main.rs                         # wire all concrete adapters/services into inbound::run(...)
         └── core/
             └── auth.rs                     # JwtTokenService implements domain::ports::TokenService
 ```

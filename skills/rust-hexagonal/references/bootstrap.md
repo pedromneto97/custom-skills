@@ -6,12 +6,12 @@ dependency graph and starts the server. No other crate should know about more th
 With static dispatch, all types are monomorphized at compile time — no `Arc<dyn Trait>` needed
 unless you explicitly want runtime polymorphism.
 
-The composition is split across three files in `app/src/`:
+The composition is usually split across three files in `app/src/`:
 
 | File | Responsibility |
 |------|---------------|
 | `config.rs` | Read env vars into a typed config struct |
-| `state.rs` | Build `web::Data<Service>` per bounded context from config |
+| `state.rs` | Build shared app state and/or typed framework app-data values from config |
 | `main.rs` | Wire state into actix-web, bind, and serve |
 | `core/` | Infrastructure services that implement domain ports but live in `app` (e.g. `JwtTokenService`) |
 
@@ -43,8 +43,8 @@ impl AppConfig {
 
 ## `app/src/state.rs`
 
-Constructs `AppState<R>` (defined in `inbound`) by wiring outbound adapters into it.
-`app` is the only crate that names the concrete repository type.
+Constructs inbound dependencies by wiring outbound adapters and app-local services.
+`app` is the only crate that names concrete adapter types.
 
 ```rust
 use inbound::state::AppState;
@@ -68,6 +68,9 @@ pub async fn build_state(cfg: &AppConfig) -> anyhow::Result<AppStateImpl> {
 }
 ```
 
+If your inbound runtime injects dependencies as separate typed values (instead of one aggregate
+state struct), keep the same boundary rule: only `app` names concrete types.
+
 ---
 
 ## `app/src/main.rs` (actix-web — preferred)
@@ -88,11 +91,8 @@ async fn main() -> std::io::Result<()> {
     let db = outbound::AppDatabase::new().await; // process::exit(1) on connect failure
     db.run_migrations().await;                   // process::exit(1) on migration failure
 
-    let state = AppState::<core::auth::JwtTokenService, outbound::AppDatabase> {
-        token_service: core::auth::JwtTokenService::new(),
-        repository: db,
-    };
-    inbound::run(state).await
+    let token_service = core::auth::JwtTokenService::new();
+    inbound::run(db, token_service).await
 }
 ```
 
@@ -147,7 +147,7 @@ path = "src/main.rs"
 domain.workspace    = true
 inbound.workspace   = true
 outbound.workspace  = true
-migration.workspace = true
+migration.workspace = true        # or migrations.workspace when crate name differs
 tokio.workspace     = true
 # layer-specific — not in workspace
 actix-web          = "4"              # or axum = "0.8"

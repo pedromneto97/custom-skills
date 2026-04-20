@@ -12,7 +12,7 @@ Hexagonal Architecture (Ports & Adapters) isolates the **domain** from all exter
 
 **Call flow (always this direction):**
 ```
-[ HTTP / CLI / gRPC ]  →  inbound  →  use case fns(R)  →  domain  →  R: Repository  →  outbound  →  [ DB / APIs ]
+[ HTTP / CLI / gRPC ]  →  inbound  →  use case fns(ports...)  →  domain  →  port traits  →  outbound  →  [ DB / APIs / cache / email ]
 ```
 
 Dependencies point **inward only** (enforced via `Cargo.toml`):
@@ -22,10 +22,12 @@ app → inbound  ─┐
 app → outbound ─┘
 ```
 
-Three crates + one binary:
-1. **`domain`** — entities, value objects, errors, port traits, use case implementations.
-2. **`inbound` / `outbound`** — concrete adapter crates; depend only on `domain`, never each other.
-3. **`app`** — binary; the only crate that knows all concrete types.
+Typical workspace shape is four crates + one binary:
+1. **`domain`** — entities, value objects, errors, ports, use cases.
+2. **`inbound`** — HTTP/gRPC/CLI adapters; depend only on `domain`.
+3. **`outbound`** — DB/API/cache/email adapters; depend only on `domain`.
+4. **`migration`** (or `migrations`) — schema migrations only.
+5. **`app`** — binary; the only crate that knows all concrete types.
 
 > **Is this still hexagonal?** Yes. The invariant holds: domain/use cases never depend on infrastructure.
 
@@ -63,7 +65,7 @@ my-app/
 ├── domain/             # lib — model, errors, ports, use cases (Layout A)
 ├── inbound/            # lib — HTTP/gRPC/CLI adapters  (actix-web preferred; axum supported)
 ├── outbound/           # lib — DB/cache adapters (SeaORM v2)
-├── migration/          # lib — DB migrations (sea-orm-migration only; no domain imports)
+├── migration/          # lib — DB migrations (some teams prefer name: migrations)
 └── app/                # bin — sole composition root
 ```
 
@@ -80,14 +82,15 @@ See [folder structure & Cargo.toml templates](./references/folder-structure.md).
 | `domain` never imports infrastructure crates | Portable, testable core |
 | Port traits live in `domain` | Domain owns its own contracts |
 | Use cases are **free async functions** generic over `R: Repository` | Static dispatch, no boilerplate trait impl |
-| Inbound handlers are **generic** over `R: AppRepository` via `web::Data<AppState<R>>` | No concrete type leaks into the HTTP layer |
-| `AppRepository` is a supertrait in `inbound` with a blanket impl | Outbound crates never import `inbound`; composition stays in `app` |
+| Domain ports are split by responsibility (`ports/repository/*`, `ports/service/*`) | Clarifies persistence vs external services contracts |
+| Inbound handlers remain generic over traits, not concrete structs | No concrete adapter type leaks into the HTTP layer |
+| Inbound DI can use one `AppState<...>` or multiple typed app-data values | Supports both simple and multi-adapter systems |
 | `inbound` and `outbound` depend **only on `domain`** | No cross-adapter coupling |
 | Prefer **`impl Iterator<Item = T>`** over `Vec<T>` in collection ports | Caller decides whether/how to allocate |
 | Prefer **static dispatch** (generics); use `Arc<dyn Trait>` only when runtime polymorphism is needed | Zero-cost unless you opt in |
 | No `async-trait` unless you need `dyn Trait` object safety | Native async fn in traits (Rust ≥ 1.75) |
 | `app/main.rs` is the only file importing all concrete types | Single composition root |
-| `AppRepository` supertrait may live in `domain/ports/mod.rs` when ≥ 2 port traits exist | Keeps the combined bound in domain; outbound never needs to import inbound |
+| Repository supertraits may live in `domain/ports/mod.rs` when many traits are combined | Keeps combined bounds where both inbound and outbound can use them |
 
 ---
 
@@ -102,8 +105,8 @@ Load only the reference for the layer you're working on:
 | 3 | Outbound port (repository trait) | [domain.md](./references/domain.md) |
 | 4 | Use case functions | [domain.md](./references/domain.md) |
 | 5 | DB migrations | [migrations.md](./references/migrations.md) |
-| 6 | Outbound adapter (SeaORM repository) | [outbound.md](./references/outbound.md) + `sea-orm` skill |
-| 7 | Inbound adapter (actix-web / axum) | [inbound.md](./references/inbound.md) + `http-actix-axum` skill |
+| 6 | Outbound adapter (SeaORM repository + mappers) | [outbound.md](./references/outbound.md) + `sea-orm` skill |
+| 7 | Inbound adapter (actix-web / axum + extractor patterns) | [inbound.md](./references/inbound.md) + `http-actix-axum` skill |
 | 8 | Wire & run | [bootstrap.md](./references/bootstrap.md) |
 
 ---
@@ -142,7 +145,7 @@ See [testing reference](./references/testing.md).
 
 - **Domain importing infrastructure crates** — `domain/Cargo.toml` must list no `sea-orm`, `actix-web`, `axum`, etc.
 - **Cross-adapter coupling** — `inbound` and `outbound` must not import each other; enforced by their `Cargo.toml`.
-- **Handler holding a concrete service type** — `web::Data<OrderService<PgRepo>>` leaks the concrete type. Use `web::Data<AppState<R>>` where `R: AppRepository` to keep the adapter generic.
+- **Handler holding a concrete service type** — `web::Data<OrderService<PgRepo>>` leaks the concrete type. Keep handlers generic over traits and inject concrete types only in `app`.
 - **Unnecessary `async-trait`** — only add it when you need `dyn Trait`. With static dispatch and Rust ≥ 1.75, remove it from port traits.
 - **`mockall::automock` on RPIT traits** — `#[automock]` compile-errors when a trait method returns `impl Trait` in return position (e.g. `async fn find_all() -> Result<impl Iterator<Item = T>, _>`). Only annotate traits with concrete return types. For RPIT traits write a hand-written fake struct in a `#[cfg(test)]` block — see [testing reference](./references/testing.md).
 - **Returning `Vec<T>` from collection ports** — prefer `impl Iterator<Item = T>`; the adapter collects from DB internally but the interface stays flexible.
@@ -151,6 +154,7 @@ See [testing reference](./references/testing.md).
 - **Using `.insert()` in `save()`** — always INSERT fails for existing records. Use an `ON CONFLICT … DO UPDATE` upsert (see `outbound.md`).
 - **`find_all()` without pagination** — fetching entire tables into memory will OOM in production. Add `page`/`limit` or cursor parameters to collection port signatures before the table grows.
 - **Expanding `AppRepository` with every new trait** — when adding a second bounded context (e.g. `CustomerRepository`), create a focused `CustomerAppRepository` supertrait rather than bolting it onto the existing one. Handlers that only handle orders should not receive a repo that also exposes customer operations.
+- **Treating DI shape as architecture law** — hexagonal architecture does not require one `AppState` format. Prefer the shape that keeps adapter boundaries clear for your runtime and framework.
 
 ---
 
