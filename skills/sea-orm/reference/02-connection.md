@@ -1,18 +1,35 @@
-# SeaORM v2 — Database Connection
+# SeaORM 2.x — Database Connection
 
 ## Simple connection
 ```rust
 use sea_orm::{Database, DatabaseConnection};
 
 let db: DatabaseConnection = Database::connect("postgres://user:pass@localhost/dbname").await?;
-// MySQL:  "mysql://user:pass@localhost/dbname"
-// SQLite: "sqlite://./db.sqlite?mode=rwc"
-// MSSQL:  "mssql://user:pass@localhost/dbname"
+// MySQL / MariaDB: "mysql://user:pass@localhost/dbname"
+// SQLite file:     "sqlite://./db.sqlite?mode=rwc"   (rwc = create if missing)
+// SQLite read-only:"sqlite://./db.sqlite?mode=ro"
+// SQLite memory:   "sqlite::memory:"
+// MSSQL (SeaORM-X):"mssql://user:pass@localhost/dbname"
 ```
 
-## MSSQL connection string options
+> v2: `DatabaseConnection` is a **struct** wrapping an inner `DatabaseConnectionType` enum
+> (it was an enum in v1). Don't `match` on its variants; use `db.get_database_backend()`.
+
+`DatabaseConnection` is cheap to clone (it holds a pool) — share it via `Clone` / app state.
+
+## Postgres schema (search_path)
+```rust
+// Via URL
+Database::connect("postgres://user:pass@localhost/db?options=--search_path=my_schema").await?;
+
+// Via ConnectOptions (preferred)
+let mut opt = ConnectOptions::new("postgres://user:pass@localhost/db");
+opt.set_schema_search_path("my_schema");
 ```
-mssql://user:pass@host/database
+
+## MSSQL connection string options (SeaORM-X)
+```
+mssql://user:pass@host/database                           # default schema dbo
 mssql://user:pass@host/database?currentSchema=my_schema
 mssql://user:pass@host:1433/database?currentSchema=my_schema&trustCertificate=true
 ```
@@ -54,6 +71,7 @@ Rules of thumb:
 - Keep `min_connections` low (1-5) unless cold-start latency is a problem.
 - Prefer non-trivial `idle_timeout`/`max_lifetime` in long-running services to recycle stale connections.
 - Enable SQL logging in development; reduce/noise-gate in production.
+- SQLite in-memory: each pooled connection is a separate DB — use `max_connections(1)` in tests.
 
 ## Ping / close
 ```rust

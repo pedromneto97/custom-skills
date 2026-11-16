@@ -36,29 +36,34 @@ impl From<order::Model> for Order {
 ```
 
 Use explicit mapper functions when conversion can fail or needs defaults.
+Don't leak `ModelEx` / `HasMany` / `ActiveModel` types through ports — map them to domain types.
 
 ## Error translation
 
-Translate `DbErr` immediately at the adapter boundary:
+Translate `DbErr` immediately at the adapter boundary. Use the portable `sql_err()` classifier
+instead of matching error message strings (details in `12-error-handling.md`):
 
 ```rust
-fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
-    let msg = err.to_string();
-    msg.contains("duplicate key")
-        || msg.contains("Duplicate entry")
-        || msg.contains("UNIQUE constraint failed")
-}
+use sea_orm::{DbErr, SqlErr};
 
-fn map_db_err(err: sea_orm::DbErr) -> DomainError {
-    if is_unique_violation(&err) {
-        return DomainError::Conflict("resource already exists".into());
+fn map_db_err(err: DbErr) -> DomainError {
+    match err.sql_err() {
+        Some(SqlErr::UniqueConstraintViolation(_)) => {
+            return DomainError::Conflict("resource already exists".into());
+        }
+        Some(SqlErr::ForeignKeyConstraintViolation(_)) => {
+            return DomainError::InvalidReference("related resource not found".into());
+        }
+        _ => {}
     }
-    DomainError::Infrastructure("database error".into())
+    match err {
+        DbErr::RecordNotFound(_) => DomainError::NotFound,
+        _ => DomainError::Infrastructure("database error".into()),
+    }
 }
 ```
 
-Prefer typed `DbErr` variants where the backend exposes them clearly; keep message fallback for
-cross-database portability.
+`SqlErr` is `#[non_exhaustive]` — always keep a fallback arm.
 
 ## Transaction pattern
 
@@ -86,6 +91,20 @@ let value = db
         TransactionError::Transaction(domain) => domain,
         TransactionError::Connection(_) => DomainError::Infrastructure("database connection".into()),
     })?;
+```
+
+More options (manual `begin`, savepoints, isolation level, async-closure API):
+see `11-transactions.md`.
+
+### Repositories that work inside or outside a transaction
+Take `&impl ConnectionTrait` (or a generic `C: ConnectionTrait`) so the same method accepts
+`&DatabaseConnection` and `&DatabaseTransaction`:
+
+```rust
+pub async fn create_order<C: ConnectionTrait>(db: &C, order: NewOrder) -> Result<Order, DomainError> {
+    let model = order::ActiveModel::from(order).insert(db).await.map_err(map_db_err)?;
+    Ok(model.into())
+}
 ```
 
 ## Collection ports and allocation
