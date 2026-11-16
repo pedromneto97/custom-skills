@@ -19,9 +19,9 @@
 | `ConditionExpression` | exists | removed |
 | `Alias::new("x")` | needed for string idens | `&'static str` works directly |
 | `Iden::unquoted` | `fn unquoted(&self, s: &mut dyn Write)` | `fn unquoted(&self) -> &str` |
-| `ConnectionTrait::execute / query_one / query_all / stream` | take `Statement` | take SeaQuery statements; raw `Statement` → `execute_raw` / `query_one_raw` / `query_all_raw` |
+| `ConnectionTrait::execute / query_one / query_all / stream` | take `Statement` | take SeaQuery statements; raw `Statement` → `execute_raw` / `query_one_raw` / `query_all_raw` / `stream_raw` |
 | `DatabaseConnection` | enum | struct wrapping `DatabaseConnectionType` — don't match on variants |
-| `insert_many(..).exec` | `InsertResult`, empty input = error | `InsertManyResult` with `last_insert_id: Option<_>`; empty input = `Ok(None)` |
+| `insert_many(..).exec` | `InsertResult`, empty input = error | `InsertManyResult` with `last_insert_id: Option<_>`; empty input = `Ok(InsertManyResult { last_insert_id: None })` |
 | `on_empty_do_nothing()` / `Insert::do_nothing()` | required for empty / conflict | deprecated — use `try_insert()` / `on_conflict_do_nothing*()` |
 | `exec_with_returning_many` | used for insert_many | deprecated — use `exec_with_returning` |
 | `Update::one(..)` / `Delete::one(..)` with `.build()` | panics if PK `NotSet` | call `.validate()?` first → `DbErr::PrimaryKeyNotSet` |
@@ -31,7 +31,9 @@
 | SQLite `Integer`/`BigInteger` | `integer` → `i32` | both → `integer`, codegen maps to `i64` (`--big-integer-type=i32` to keep `i32`) |
 | SQLite `RETURNING` | opt-in | `sqlite-use-returning-for-3_35` on by default |
 | MariaDB `RETURNING` | not supported | opt-in via `mariadb-use-returning` |
-| `DeriveValueType` | not usable as PK | implements `TryFromU64` / `IntoActiveValue` — newtype PKs work |
+| `DeriveValueType` | not usable as PK | also derives `NotU8`, `IntoActiveValue`, `TryFromU64` — newtype PKs work; **delete manual impls** of these or you get conflicting-impl errors |
+| `runtime-actix*` features | alias of tokio runtimes | removed — use `runtime-tokio-*` |
+| `DeriveCustomColumn`, `default_as_str` | available | removed |
 | Migrations | Postgres runs all in one batch txn | each migration wrapped individually; `use_transaction()` per migration |
 
 ## New in v2 (opt-in)

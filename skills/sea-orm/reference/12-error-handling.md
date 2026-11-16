@@ -6,17 +6,18 @@ All SeaORM operations return `Result<_, DbErr>`.
 ```rust
 use sea_orm::{DbErr, SqlErr};
 
-match user_am.insert(db).await {
-    Ok(model) => Ok(model),
-    Err(err) => match err.sql_err() {
-        Some(SqlErr::UniqueConstraintViolation(msg)) => Err(DomainError::Conflict(msg)),
-        Some(SqlErr::ForeignKeyConstraintViolation(msg)) => Err(DomainError::InvalidReference(msg)),
-        _ => Err(DomainError::Infrastructure(err.to_string())),
-    },
+match err.sql_err() {
+    Some(SqlErr::UniqueConstraintViolation(detail)) => { /* duplicate key */ }
+    Some(SqlErr::ForeignKeyConstraintViolation(detail)) => { /* missing / referenced parent */ }
+    _ => { /* anything else */ }
 }
 ```
 
-- Works across MySQL, Postgres, SQLite (and MSSQL via SeaORM-X).
+`detail` is the driver message (table / constraint names) — log it, never put it in the domain
+error or API response. Domain mapping with fixed messages: `10-repository-patterns.md`.
+
+- Works across MySQL, Postgres and SQLite (sqlx) and rusqlite. For MSSQL (SeaORM-X) see
+  `08-mssql-features.md`.
 - Only unique-key and foreign-key violations are recognized; `SqlErr` is `#[non_exhaustive]`.
 - Do **not** string-match driver messages (`"duplicate key"`, `"Duplicate entry"`, ...) — they
   differ per backend and locale.

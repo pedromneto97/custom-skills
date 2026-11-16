@@ -15,12 +15,9 @@ features = [
   "with-uuid",
   "with-chrono",            # or with-time
 ]
-
-# migration crate (see 03-migrations.md)
-[dependencies.sea-orm-migration]
-version = "2.0"
-features = ["runtime-tokio-rustls", "sqlx-postgres"]   # match main crate
 ```
+
+Migration crate dependencies: see `03-migrations.md`.
 
 > Default features already include `macros`, `with-json`, `with-chrono`, `with-time`,
 > `with-uuid`, `with-rust_decimal`. Set `default-features = false` to trim them.
@@ -39,6 +36,7 @@ features = ["runtime-tokio-rustls", "sqlz-mssql", "macros", "with-uuid", "with-c
 
 [dependencies.sea-orm-migration]
 git = "ssh://git@github.com/SeaQL/sea-orm-x.git"
+features = ["runtime-tokio-rustls", "sqlz-mssql"]   # needed to run migrations via the CLI
 
 # Option B — local checkout
 # sea-orm           = { version = "2.0.0-rc", path = "<SEA_ORM_X_ROOT>/sea-orm-x", features = [...] }

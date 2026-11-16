@@ -33,6 +33,7 @@ argument-hint: 'Describe the task, e.g. "set up migrations for MSSQL", "insert m
 | Transactions — closure, manual, nested (savepoints), isolation level | `reference/11-transactions.md` |
 | Error handling — `DbErr`, `sql_err()` / `SqlErr`, driver error codes | `reference/12-error-handling.md` |
 | Entity-first workflow — `schema-sync`, schema registry, `sync` / `apply` | `reference/13-entity-first.md` |
+| Testing — `MockDatabase`, SQLite in-memory, testcontainers | `reference/14-testing.md` |
 
 ## Quick decision guide
 
@@ -42,6 +43,7 @@ argument-hint: 'Describe the task, e.g. "set up migrations for MSSQL", "insert m
 - **Multi-statement writes?** → load `11-transactions.md`
 - **Implementing repositories?** → load `10-repository-patterns.md` + `12-error-handling.md` (+ relevant CRUD file)
 - **Using MSSQL / SeaORM-X?** → always also load `08-mssql-features.md`
+- **Writing tests?** → load `14-testing.md`
 - **Upgrading from v1?** → load `09-v1-v2-migration.md`
 
 ## Key v2 concepts (quick reference)

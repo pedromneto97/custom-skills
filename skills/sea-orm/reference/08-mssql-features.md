@@ -47,22 +47,16 @@ cake::Entity::find()
 - `INSERT` → `OUTPUT INSERTED.*` (powers `exec_with_returning`)
 - `DELETE` → `OUTPUT DELETED.*`
 - UPDATE returning is not documented for SeaORM-X — re-select after `update_many` if needed.
-- Constraint violations are classified like other backends:
-  `err.sql_err()` → `SqlErr::UniqueConstraintViolation` / `SqlErr::ForeignKeyConstraintViolation`
-  (see `12-error-handling.md`).
+- Constraint violations come back as **typed `DbErr` variants** (not raw driver errors), per the
+  SeaORM-X docs. The docs don't say whether `err.sql_err()` classifies them — verify on your
+  SeaORM-X version with a duplicate-key test before relying on the portable mapping in
+  `12-error-handling.md`; otherwise match the SeaORM-X variant directly.
 
 ## Raw batches
 `execute_unprepared` sends a raw TDS batch — use it for multi-statement T-SQL in migrations.
 
-## Entity-first schema sync (`schema-sync` feature)
-Works on MSSQL too — see `13-entity-first.md`.
-```rust
-db.get_schema_builder()
-    .register(order::Entity)
-    .register(customer::Entity)
-    .sync(db)                    // creates tables in FK-topological order
-    .await?;
-```
+## Entity-first schema sync
+`schema-sync` works on MSSQL too — see `13-entity-first.md`.
 
 ## Known SQLz limitations
 - No compile-time query verification (no equivalent of `sqlx::query!` macro)

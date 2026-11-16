@@ -52,9 +52,13 @@ version = "2.0"
 features = [
   # Needed to run migrations via the CLI / main.rs. Match the main crate.
   "runtime-tokio-rustls",
-  "sqlx-postgres",        # or sqlx-mysql / sqlx-sqlite
+  "sqlx-postgres",        # or sqlx-mysql / sqlx-sqlite; SeaORM-X: "sqlz-mssql"
 ]
 ```
+
+> SeaORM-X (MSSQL): the migration crate comes from the same git repo / path as `sea-orm`
+> (`01-cargo-setup.md`) and must enable `sqlz-mssql`, or `sea-orm-cli migrate -u mssql://…`
+> runs a migrator without an MSSQL driver.
 
 ## `migration/src/lib.rs`
 ```rust

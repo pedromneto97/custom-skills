@@ -1,5 +1,9 @@
 # SeaORM 2.x — CRUD: Select
 
+> Example schema: `user` / `post` / `profile` / `tag` / `user_tag` / `order` / `customer` are the
+> dense entities in `04-entity-structure.md`. `cake` / `fruit` / `filling` are the official docs'
+> bakery sample, also declared with `#[sea_orm::model]`.
+
 ## Find by primary key
 ```rust
 let cake: Option<cake::Model> = Cake::find_by_id(1).one(db).await?;
@@ -32,7 +36,7 @@ cake::Column::Name.contains("choc")
 // New (type-aware, compile-time checked)
 cake::COLUMN.name.contains("choc")          // StringColumn methods only
 user::COLUMN.id.between(1, 100)             // NumericColumn methods only
-user::COLUMN.created_at.gt(some_date)       // DateTimeLikeColumn methods only
+order::COLUMN.created_at.gt(some_date)      // DateTimeLikeColumn methods only
 // cake::COLUMN.name.like(2)  → compile error
 // Also reachable as cake::Entity::COLUMN
 ```
@@ -65,68 +69,60 @@ let rows = Cake::find().filter(cake::Column::Id.eq_any(vec![1, 2, 3])).all(db).a
 
 ## Lazy loading
 ```rust
-let cake = Cake::find_by_id(1).one(db).await?.unwrap();
-let fruits: Vec<fruit::Model> = cake.find_related(Fruit).all(db).await?;
+let bob: user::Model = user::Entity::find_by_email("bob@example.com").require_one(db).await?;
+let posts: Vec<post::Model> = bob.find_related(post::Entity).all(db).await?;
 ```
 
-## Eager loading
+## Eager loading (JOIN)
 ```rust
-// 1-to-1 join
-let pairs: Vec<(fruit::Model, Option<cake::Model>)> =
-    Fruit::find().find_also_related(Cake).all(db).await?;
+// N-1 / 1-1
+let pairs: Vec<(post::Model, Option<user::Model>)> =
+    post::Entity::find().find_also_related(user::Entity).all(db).await?;
 
-// 1-to-many / many-to-many
-let with_fruits: Vec<(cake::Model, Vec<fruit::Model>)> =
-    Cake::find().find_with_related(Fruit).all(db).await?;
+// 1-N and M-N (rows consolidated per left entity)
+let with_posts: Vec<(user::Model, Vec<post::Model>)> =
+    user::Entity::find().find_with_related(post::Entity).all(db).await?;
+let with_tags: Vec<(user::Model, Vec<tag::Model>)> =
+    user::Entity::find().find_with_related(tag::Entity).all(db).await?;   // via user_tag
 ```
 
 ## LoaderTrait (batched, avoids N+1)
 ```rust
-let cakes: Vec<cake::Model> = Cake::find().all(db).await?;
+let users: Vec<user::Model> = user::Entity::find().all(db).await?;
 
-// 1-to-1 / N-1 (relation must be has_one or belongs_to — load_one on has_many errors at runtime)
-let fruits: Vec<fruit::Model> = Fruit::find().all(db).await?;
-let cake_of_each: Vec<Option<cake::Model>> = fruits.load_one(Cake, db).await?;
+// 1-1 / N-1 — relation must be has_one or belongs_to (load_one on has_many errors at runtime)
+let profiles: Vec<Option<profile::Model>> = users.load_one(profile::Entity, db).await?;
 
-// 1-to-many
-let all_fruits: Vec<Vec<fruit::Model>> = cakes.load_many(Fruit, db).await?;
+// 1-N
+let posts: Vec<Vec<post::Model>> = users.load_many(post::Entity, db).await?;
 
-// many-to-many (v2: no junction entity argument required)
-let all_fillings: Vec<Vec<filling::Model>> = cakes.load_many(Filling, db).await?;
+// M-N (v2: no junction entity argument required)
+let tags: Vec<Vec<tag::Model>> = users.load_many(tag::Entity, db).await?;
 ```
 
-## v2 — Entity Loader (requires `#[sea_orm::model]`)
+## v2 — Entity Loader (`#[sea_orm::model]` or `#[sea_orm::compact_model]`)
 Returns nested `ModelEx` values whose relation fields are filled. Uses a JOIN for 1-1 and a
-batched data loader for 1-N / M-N — no N+1. `filter_by_<unique>` / `filter_by_id` are available
-on the loader.
+batched data loader for 1-N / M-N — no N+1. `filter_by_id` / `filter_by_<unique>` are available
+on the loader. Relation fields need the dense `#[sea_orm::model]` format.
 
 ```rust
-let super_cake: cake::ModelEx = cake::Entity::load()
-    .filter_by_id(1)
-    .with(fruit::Entity)
-    .with(filling::Entity)     // M-N: no junction entity needed
+let bob: user::ModelEx = user::Entity::load()
+    .filter_by_email("bob@example.com")
+    .with(profile::Entity)     // has_one  → JOIN
+    .with(post::Entity)        // has_many → data loader
+    .with(tag::Entity)         // M-N via user_tag, no junction entity needed
     .one(db)
     .await?
     .unwrap();
-// super_cake.fruits   → HasMany::Loaded(vec![fruit::ModelEx { .. }])    (cake has_many fruit)
-// super_cake.fillings → HasMany::Loaded(vec![filling::ModelEx { .. }])  (M-N via cake_filling)
-// a has_one field would be HasOne::Loaded(Some(..))
-// unrequested relations stay HasOne::Unloaded / HasMany::Unloaded
-// (field names come from the relation fields on cake::Model)
+// bob.profile → HasOne::Loaded(Some(profile::ModelEx { .. }))
+// bob.posts   → HasMany::Loaded(vec![post::ModelEx { .. }])
+// bob.tags    → HasMany::Loaded(vec![tag::ModelEx { .. }])
+// relations not requested stay HasOne::Unloaded / HasMany::Unloaded
 
-// Nested: user → posts → tags
-let smart_user = user::Entity::load()
+// Nested: user → posts → comments (post::Model must declare its own has_many comments field)
+let smart = user::Entity::load()
     .filter_by_id(42)
-    .with(profile::Entity)
-    .with((post::Entity, tag::Entity))   // nested: post::Model must declare its tags relation
-    .one(db)
-    .await?;
-
-// With unique key filter
-let bob = user::Entity::load()
-    .filter_by_email("bob@example.com")
-    .with(profile::Entity)
-    .with(post::Entity)
+    .with((post::Entity, comment::Entity))
     .one(db)
     .await?;
 
@@ -157,8 +153,8 @@ let first_10 = cursor.first(10).all(db).await?;
 let last_10  = cursor.last(10).all(db).await?;   // returned in ASC order
 
 // Composite cursor
-let rows = cake_filling::Entity::find()
-    .cursor_by((cake_filling::Column::CakeId, cake_filling::Column::FillingId))
+let rows = user_tag::Entity::find()
+    .cursor_by((user_tag::Column::UserId, user_tag::Column::TagId))
     .after((0, 1))
     .first(3)
     .all(db)
@@ -171,23 +167,21 @@ When a query joins tables and you only need a subset of columns from multiple en
 define a projection struct with `#[derive(FromQueryResult)]`:
 
 ```rust
-use sea_orm::{FromQueryResult, JoinType, QuerySelect, RelationTrait};
+use sea_orm::{FromQueryResult, QuerySelect};
 
 #[derive(Debug, FromQueryResult)]
 struct OrderSummaryRow {
-    order_id:    i64,
-    customer_id: i64,
-    store_name:  String, // from a joined table
-    role:        Role,   // DeriveActiveEnum columns map directly
+    order_id:      i32,     // match the entity's Rust types (order.id is i32)
+    status:        String,
+    customer_name: String,  // from the joined table
 }
 
 let rows: Vec<OrderSummaryRow> = order::Entity::find()
-    .join(JoinType::InnerJoin, order::Relation::Store.def())
+    .inner_join(customer::Entity)          // join condition from the belongs_to relation
     .select_only()
-    .column_as(order::Column::Id,         "order_id")
-    .column_as(order::Column::CustomerId,  "customer_id")
-    .column_as(store::Column::Name,        "store_name")
-    .column_as(order::Column::Role,        "role")
+    .column_as(order::Column::Id,      "order_id")
+    .column(order::Column::Status)
+    .column_as(customer::Column::Name, "customer_name")
     .into_model::<OrderSummaryRow>()
     .all(db)
     .await?;
@@ -235,10 +229,11 @@ use sea_orm::raw_sql;
 
 let ids = [2, 3, 4];
 let name = "Bob";
+// Select every column of the model (a missing column fails at runtime)
 let user: Option<user::Model> = user::Entity::find()
     .from_raw_sql(raw_sql!(
         Postgres,
-        r#"SELECT "id", "name" FROM "user" WHERE "name" LIKE {name} AND "id" IN ({..ids})"#
+        r#"SELECT * FROM "user" WHERE "name" LIKE {name} AND "id" IN ({..ids})"#
     ))
     .one(db)
     .await?;

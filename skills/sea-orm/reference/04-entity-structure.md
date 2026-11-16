@@ -44,8 +44,10 @@ Relations are typed fields on `Model` — no separate `Relation` enum / `Related
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
+    pub name: String,
     #[sea_orm(unique)]
     pub email: String,
+    pub active: bool,
 
     #[sea_orm(has_one)]
     pub profile: HasOne<super::profile::Entity>,      // 1-1
@@ -55,6 +57,21 @@ pub struct Model {
 
     #[sea_orm(has_many, via = "user_tag")]
     pub tags: HasMany<super::tag::Entity>,            // M-N through junction table
+}
+impl ActiveModelBehavior for ActiveModel {}
+```
+
+```rust
+// customer.rs — parent of order (see the dense order entity above)
+#[sea_orm::model]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[sea_orm(table_name = "customer")]
+pub struct Model {
+    #[sea_orm(primary_key)]
+    pub id: i32,
+    pub name: String,
+    #[sea_orm(has_many)]
+    pub orders: HasMany<super::order::Entity>,
 }
 impl ActiveModelBehavior for ActiveModel {}
 ```
@@ -82,6 +99,10 @@ impl ActiveModelBehavior for ActiveModel {}
 | M-N | `HasMany<E>` | `#[sea_orm(has_many, via = "junction_table")]` |
 | N-1 (child side, FK here) | `BelongsTo<E>` | `#[sea_orm(belongs_to, from = "fk_col", to = "pk_col")]` |
 | Nullable FK | `BelongsTo<Option<E>>` | same as above |
+
+`profile` (`id`, unique `user_id`, `picture`, `belongs_to` user) and `tag` (`id`, unique `name`,
+`has_many users via user_tag`) follow the same pattern; other reference files use this
+user / post / profile / tag / order / customer schema.
 
 - `BelongsTo<E>` requires every `from` column to be `NOT NULL`; `BelongsTo<Option<E>>` requires a
   nullable one. A mismatch is a **compile error**.
