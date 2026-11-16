@@ -35,8 +35,14 @@ Empty input is **not** an error in v2 — it returns `Ok` with `last_insert_id =
 (deprecated since 2.0).
 
 ## Insert with returning
-Supported on Postgres and SQLite (≥ 3.35, on by default), MariaDB with `mariadb-use-returning`,
-and MSSQL via SeaORM-X (`OUTPUT INSERTED.*`). Not on MySQL.
+Native `RETURNING` on Postgres and SQLite (≥ 3.35, default feature), MariaDB with
+`mariadb-use-returning`, and MSSQL via SeaORM-X (`OUTPUT INSERTED.*`).
+
+| Call | MySQL (no RETURNING) |
+|------|----------------------|
+| `insert(am).exec_with_returning` | works — SeaORM runs INSERT, then `find_by_id(last_insert_id)` |
+| `insert_many(..).exec_with_returning` | `DbErr::BackendNotSupported` |
+| `exec_with_returning_keys` | `DbErr::BackendNotSupported` |
 
 ```rust
 // Single
@@ -130,16 +136,24 @@ Multi-statement inserts belong in a transaction — see `11-transactions.md`.
 ### Batch initialization inside a transaction
 
 ```rust
-let user = users::ActiveModel { email: Set(email), ..Default::default() }
-    .insert(txn)
-    .await?;
+// `setting` = (id PK, user_id, key, value); txn from 11-transactions.md
+let user = user::ActiveModel {
+    name: Set(name),
+    email: Set(email),
+    active: Set(true),
+    ..Default::default()
+}
+.insert(txn)
+.await?;
 
-let defaults = vec![
-    settings::ActiveModel { user_id: Set(user.id), key: Set("theme".into()), value: Set("light".into()) },
-    settings::ActiveModel { user_id: Set(user.id), key: Set("locale".into()), value: Set("en".into()) },
-];
+let defaults = [("theme", "light"), ("locale", "en")].map(|(k, v)| setting::ActiveModel {
+    user_id: Set(user.id),
+    key: Set(k.into()),
+    value: Set(v.into()),
+    ..Default::default()                       // id stays NotSet → auto-increment
+});
 
-settings::Entity::insert_many(defaults).exec(txn).await?;
+setting::Entity::insert_many(defaults).exec(txn).await?;
 ```
 
 ## Duplicate-key errors

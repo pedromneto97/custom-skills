@@ -2,7 +2,8 @@
 
 > Example schema: `user` / `post` / `profile` / `tag` / `user_tag` / `order` / `customer` are the
 > dense entities in `04-entity-structure.md`. `cake` / `fruit` / `filling` are the official docs'
-> bakery sample, also declared with `#[sea_orm::model]`.
+> bakery sample — assume them declared with `#[sea_orm::model]` (cake has_one fruit, M-N filling via
+> `cake_filling`). The classic `cake` in 04 has no `COLUMN`; use `cake::Column::*` with it.
 
 ## Find by primary key
 ```rust
@@ -196,9 +197,13 @@ let domain_summaries: Vec<OrderSummary> = rows.into_iter().map(Into::into).colle
 
 ## Select all columns except some (2.0.4+)
 ```rust
-let posts: Vec<PostPreview> = post::Entity::find()
-    .select_except([post::Column::Body])
-    .into_model::<PostPreview>()
+#[derive(DerivePartialModel)]
+#[sea_orm(entity = "user::Entity")]
+struct UserPreview { id: i32, name: String }
+
+let users: Vec<UserPreview> = user::Entity::find()
+    .select_except([user::Column::Email])
+    .into_model::<UserPreview>()
     .all(db)
     .await?;
 ```

@@ -208,24 +208,22 @@ let domain_order: Order = row.into(); // From impl invoked here
 Repository implementations should map infrastructure errors immediately:
 
 ```rust
-fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
-    let msg = err.to_string();
-    msg.contains("duplicate key")
-        || msg.contains("Duplicate entry")
-        || msg.contains("UNIQUE constraint failed")
+use sea_orm::{DbErr, SqlErr};
+
+fn map_db_err(err: DbErr) -> DomainError {
+    match err.sql_err() {
+        Some(SqlErr::UniqueConstraintViolation(_)) => DomainError::Conflict("resource already exists".into()),
+        _ => DomainError::Infrastructure("database error".into()),
+    }
 }
 
 // in repository method
-.map_err(|e| {
-    if is_unique_violation(&e) {
-        return DomainError::Conflict("resource already exists".into());
-    }
-    DomainError::Infrastructure("database error".into())
-})
+.map_err(map_db_err)
 ```
 
-Prefer typed database error variants when available; use message fallback only for cross-database
-portability.
+`DbErr::sql_err()` classifies unique / foreign-key violations portably across MySQL, Postgres and
+SQLite — don't string-match driver messages. More variants: `sea-orm` skill,
+`reference/12-error-handling.md`.
 
 ---
 

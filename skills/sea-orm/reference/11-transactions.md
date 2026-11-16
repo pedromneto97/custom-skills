@@ -7,23 +7,32 @@ Both implement `ConnectionTrait`.
 ```rust
 use sea_orm::{TransactionError, TransactionTrait};
 
-// Type params: <_, ReturnType, ErrorType>
-let (user, order) = db
-    .transaction::<_, (User, Order), DomainError>(|txn| {
+// Type params: <_, ReturnType, ErrorType>; map_db_err: 10-repository-patterns.md
+// `reference: String` and `now: DateTime` are moved into the closure;
+// the error type (DomainError) must implement std::error::Error
+let (customer, order) = db
+    .transaction::<_, (Customer, Order), DomainError>(|txn| {
         Box::pin(async move {
-            let user: User = user::ActiveModel { name: Set("Alice".into()), ..Default::default() }
+            // Set every NOT NULL column without a DB default — NotSet fields are left out of the INSERT
+            let customer: Customer = customer::ActiveModel { name: Set("Alice".into()), ..Default::default() }
                 .insert(txn)
                 .await
                 .map_err(map_db_err)?
                 .into();
 
-            let order: Order = order::ActiveModel { user_id: Set(user.id), ..Default::default() }
-                .insert(txn)
-                .await
-                .map_err(map_db_err)?
-                .into();
+            let order: Order = order::ActiveModel {
+                customer_id: Set(customer.id),
+                status: Set("new".into()),
+                reference: Set(reference),
+                created_at: Set(now),
+                ..Default::default()
+            }
+            .insert(txn)
+            .await
+            .map_err(map_db_err)?
+            .into();
 
-            Ok((user, order))
+            Ok((customer, order))
         })
     })
     .await

@@ -27,6 +27,42 @@ pub struct Model {
 impl ActiveModelBehavior for ActiveModel {}
 ```
 
+## Lifecycle hooks (`ActiveModelBehavior`)
+The empty impl wires up default hooks. Override them for validation, defaults or timestamps.
+The trait is an `async_trait`, so the impl needs the attribute:
+
+```rust
+use sea_orm::ActiveValue::{self, Set};   // not in entity::prelude
+
+#[async_trait::async_trait]
+impl ActiveModelBehavior for ActiveModel {
+    // Called by ActiveModel::new() — pre-fill columns
+    fn new() -> Self {
+        Self { status: Set("new".to_owned()), ..ActiveModelTrait::default() }
+    }
+
+    // insert = true on INSERT, false on UPDATE. Return Err to abort the save.
+    async fn before_save<C>(mut self, _db: &C, insert: bool) -> Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        if insert && self.created_at.is_not_set() {
+            self.created_at = Set(chrono::Utc::now().naive_utc());
+        }
+        if matches!(&self.reference, ActiveValue::Set(r) if r.is_empty()) {
+            return Err(DbErr::Custom("reference must not be empty".into()));
+        }
+        Ok(self)
+    }
+
+    // Also: after_save(model, db, insert) -> Result<Model, DbErr>,
+    //       before_delete(self, db) / after_delete(self, db) -> Result<Self, DbErr>
+}
+```
+
+Hooks run only for the ActiveModel methods (`am.insert/update/save/delete(db)`) — **not** for
+`Entity::insert(..)`, `insert_many`, `update_many` or `delete_many`.
+
 > `#[sea_orm::compact_model]` generates the same COLUMN / `find_by_*` / `delete_by_*` / ModelEx /
 > Entity Loader, but relations stay in a classic `Relation` enum + `Related` impls (no
 > `HasOne`/`HasMany`/`BelongsTo` fields). A plain `#[derive(DeriveEntityModel)]` with neither

@@ -50,7 +50,7 @@ argument-hint: 'Describe the task, e.g. "set up migrations for MSSQL", "insert m
 
 - Use `#[sea_orm::model]` (dense format) to unlock `COLUMN` constants, auto `find_by_*`/`delete_by_*` (and `filter_by_*` on the Entity Loader), `ModelEx`, Entity Loader and nested ActiveModel (`ActiveModel::builder()`). `#[sea_orm::compact_model]` also gets COLUMN / `find_by_*` / ModelEx / loader, but keeps relations in a classic `Relation` enum (no relation fields). A plain `#[derive(DeriveEntityModel)]` without either attribute gets none of these.
 - Relations are typed fields on the dense model: `HasOne<E>`, `HasMany<E>`, `BelongsTo<E>`.
-- `exec_with_returning` works on INSERT, UPDATE, DELETE for Postgres and SQLite (MariaDB with `mariadb-use-returning`). MSSQL (SeaORM-X) maps INSERT/DELETE to `OUTPUT INSERTED.*` / `OUTPUT DELETED.*`.
+- `exec_with_returning` works on INSERT, UPDATE, DELETE for Postgres and SQLite (MariaDB with `mariadb-use-returning`). On MySQL only single-row insert works (INSERT + re-select). MSSQL (SeaORM-X) maps INSERT/DELETE to `OUTPUT INSERTED.*` / `OUTPUT DELETED.*`.
 - `insert_many` returns `InsertManyResult` (`last_insert_id: Option<_>`); empty input is `Ok`, not an error.
 - A conflict that inserts nothing returns `DbErr::RecordNotInserted`; call `.try_insert()` (or `on_conflict_do_nothing*()`) to get `TryInsertResult::Conflicted` instead.
 - Classify DB errors with `err.sql_err()` → `SqlErr::UniqueConstraintViolation` / `ForeignKeyConstraintViolation` — do not string-match messages.

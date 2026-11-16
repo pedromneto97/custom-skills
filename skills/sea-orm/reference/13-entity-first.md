@@ -52,7 +52,7 @@ db.get_schema_builder()
 | New entity | `CREATE TABLE` (+ FKs, unique indexes) |
 | New field | `ALTER TABLE ... ADD COLUMN` |
 | `#[sea_orm(unique)]` added / removed | unique index created / dropped |
-| New `belongs_to` relation | foreign key created |
+| New `belongs_to` relation | foreign key created — **except SQLite** when the table already exists (no FK; relation queries still work, integrity not enforced) |
 | Field renamed with `#[sea_orm(renamed_from = "old")]` | column renamed (instead of add + keep old) |
 | Field / entity removed | **nothing** — no destructive drops of tables, columns or FKs |
 | Column type changed | not migrated — write a migration |

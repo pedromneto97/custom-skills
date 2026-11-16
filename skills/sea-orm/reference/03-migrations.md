@@ -168,11 +168,11 @@ pk_auto(col)                     // PK + auto-increment (IDENTITY on Postgres 2.
 pk_uuid(col)                     // UUID PK
 big_integer(col)                 // BIGINT
 big_integer_null(col)            // nullable BIGINT
-string(col)                      // VARCHAR(255) / nvarchar(255) on MSSQL
-string_null(col)                 // nullable VARCHAR(255)
+string(col)                      // MySQL VARCHAR(255); Postgres/SQLite unbounded VARCHAR; MSSQL nvarchar(255)
+string_null(col)                 // nullable, same length rule as string()
 string_len(col, 100)             // VARCHAR(100)
 string_len_null(col, 100)        // nullable VARCHAR(100)
-string_uniq(col)                 // VARCHAR(255) UNIQUE
+string_uniq(col)                 // string() + UNIQUE — use string_len_uniq for a fixed limit
 string_len_uniq(col, 320)        // VARCHAR(320) UNIQUE
 integer(col)                     // INT
 integer_null(col)                // nullable INT
@@ -185,7 +185,7 @@ uuid(col)                        // UUID
 json_binary(col)                 // JSONB
 
 // ENUM column (name, enum type, variants)
-enumeration(col, "role", ["owner", "admin", "operator"])
+enumeration(col, "role", ["owner", "admin", "operator"])   // Postgres: create_type "role" FIRST
 enumeration_null(col, "role", ["owner", "admin", "operator"])
 
 // Default value
@@ -241,6 +241,10 @@ manager.has_index("orders", "idx-orders-status").await?
 ```
 
 ### Postgres ENUM type
+On Postgres `enumeration(col, "role", ..)` references a type named `role`, so `create_type` must
+run **before** the `create_table` that uses it (otherwise: `type "role" does not exist`).
+In `down`, drop the table first, then the type.
+
 ```rust
 use sea_orm_migration::sea_query::extension::postgres::Type;
 
