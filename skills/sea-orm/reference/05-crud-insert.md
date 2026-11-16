@@ -34,8 +34,6 @@ Empty input is **not** an error in v2 — it returns `Ok` with `last_insert_id =
 (and `vec![]` for `exec_with_returning`). `on_empty_do_nothing()` is no longer needed
 (deprecated since 2.0).
 
-Useful for initialization flows where one transaction creates a root record and related defaults.
-
 ## Insert with returning
 Supported on Postgres and SQLite (≥ 3.35, on by default), MariaDB with `mariadb-use-returning`,
 and MSSQL via SeaORM-X (`OUTPUT INSERTED.*`). Not on MySQL.
@@ -53,7 +51,7 @@ let keys: Vec<(i32, i32)> = link::Entity::insert_many([am1, am2])
     .await?;   // MySQL → DbErr::BackendNotSupported
 ```
 
-> Deprecated in 2.0: `exec_with_returning_many` (use `exec_with_returning`), `Insert::do_nothing()`
+> Deprecated in 2.0: `insert_many(..).exec_with_returning_many` (use `exec_with_returning`), `Insert::do_nothing()`
 > and `on_empty_do_nothing()` (use `try_insert()` / `on_conflict_do_nothing*()`).
 
 ## On-conflict
@@ -145,19 +143,8 @@ settings::Entity::insert_many(defaults).exec(txn).await?;
 ```
 
 ## Duplicate-key errors
-Use `err.sql_err()` — don't string-match driver messages. See `12-error-handling.md`.
-
-```rust
-use sea_orm::{DbErr, SqlErr};
-
-match user_am.insert(db).await {
-    Ok(m) => Ok(m),
-    Err(e) if matches!(e.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) => {
-        Err(DomainError::Conflict("email already used".into()))
-    }
-    Err(e) => Err(DomainError::Infrastructure(e.to_string())),
-}
-```
+Classify with `err.sql_err()` → `SqlErr::UniqueConstraintViolation` — don't string-match driver
+messages. Snippet and full mapping: `12-error-handling.md`.
 
 ---
 

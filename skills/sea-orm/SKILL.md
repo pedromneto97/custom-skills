@@ -46,7 +46,7 @@ argument-hint: 'Describe the task, e.g. "set up migrations for MSSQL", "insert m
 
 ## Key v2 concepts (quick reference)
 
-- Use `#[sea_orm::model]` (dense format) to unlock `COLUMN` constants, auto `find_by_*`/`delete_by_*` (and `filter_by_*` on the Entity Loader), `ModelEx`, Entity Loader and nested ActiveModel (`ActiveModel::builder()`). `#[sea_orm::compact_model]` does **not** get these.
+- Use `#[sea_orm::model]` (dense format) to unlock `COLUMN` constants, auto `find_by_*`/`delete_by_*` (and `filter_by_*` on the Entity Loader), `ModelEx`, Entity Loader and nested ActiveModel (`ActiveModel::builder()`). `#[sea_orm::compact_model]` also gets COLUMN / `find_by_*` / ModelEx / loader, but keeps relations in a classic `Relation` enum (no relation fields). A plain `#[derive(DeriveEntityModel)]` without either attribute gets none of these.
 - Relations are typed fields on the dense model: `HasOne<E>`, `HasMany<E>`, `BelongsTo<E>`.
 - `exec_with_returning` works on INSERT, UPDATE, DELETE for Postgres and SQLite (MariaDB with `mariadb-use-returning`). MSSQL (SeaORM-X) maps INSERT/DELETE to `OUTPUT INSERTED.*` / `OUTPUT DELETED.*`.
 - `insert_many` returns `InsertManyResult` (`last_insert_id: Option<_>`); empty input is `Ok`, not an error.

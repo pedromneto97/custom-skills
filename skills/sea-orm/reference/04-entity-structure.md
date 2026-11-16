@@ -27,8 +27,11 @@ pub struct Model {
 impl ActiveModelBehavior for ActiveModel {}
 ```
 
-> `#[sea_orm::compact_model]` also exists but does **not** generate COLUMN / ModelEx / nested
-> ActiveModel. Prefer `#[sea_orm::model]` for new code.
+> `#[sea_orm::compact_model]` generates the same COLUMN / `find_by_*` / `delete_by_*` / ModelEx /
+> Entity Loader, but relations stay in a classic `Relation` enum + `Related` impls (no
+> `HasOne`/`HasMany`/`BelongsTo` fields). A plain `#[derive(DeriveEntityModel)]` with neither
+> attribute (the classic compact format below) gets none of the v2 helpers.
+> Prefer `#[sea_orm::model]` for new code.
 
 ## Relations in the dense format
 
@@ -198,13 +201,17 @@ pub struct UserId(pub i32);   // v2: usable as a primary key
 sea-orm-cli generate entity -u postgres://user:pass@localhost/db -o entity/src --entity-format dense
 
 # Common flags
+#   --entity-format   dense (v2 recommended) | compact | expanded
+#   -l                emit lib.rs instead of mod.rs
+#   --with-serde      none | serialize | deserialize | both
+#   --date-time-crate chrono | time
 sea-orm-cli generate entity \
   --database-url "postgres://user:pass@localhost/db" \
-  --entity-format dense \        # dense (v2 recommended) | compact | expanded
+  --entity-format dense \
   -o entity/src \
-  -l \                           # emit lib.rs instead of mod.rs
-  --with-serde both \            # none | serialize | deserialize | both
-  --date-time-crate chrono \     # chrono | time
+  -l \
+  --with-serde both \
+  --date-time-crate chrono \
   --max-connections 1
 
 # SQLite: INTEGER now maps to i64 in v2; force i32 with

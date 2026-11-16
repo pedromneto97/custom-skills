@@ -1,4 +1,4 @@
-# SeaORM v2 — MSSQL-Specific Features (SeaORM-X)
+# SeaORM 2.x — MSSQL-Specific Features (SeaORM-X)
 
 > SeaORM-X is a **commercial, closed-beta** extension (SSH access to `SeaQL/sea-orm-x` required).
 > It is still pinned to `2.0.0-rc` while open-source SeaORM is on stable 2.0.x — check API
@@ -6,15 +6,8 @@
 > Setup: `01-cargo-setup.md`. Connection string: `02-connection.md`.
 
 ## Nested transactions via savepoints
-```rust
-let txn = db.begin().await?;
-{
-    let inner = txn.begin().await?;
-    // ... work ...
-    inner.commit().await?;   // commits to savepoint only
-}
-txn.commit().await?;         // commits outer transaction
-```
+Same API as other backends (`txn.begin()` inside a transaction — see `11-transactions.md`).
+SeaORM-X emits:
 
 | Depth | `begin` | `commit` | `rollback` |
 |-------|---------|----------|------------|

@@ -24,9 +24,10 @@ match user_am.insert(db).await {
 ## Common `DbErr` variants
 | Variant | When |
 |---------|------|
-| `RecordNotFound(String)` | `require_one`, update/delete of a missing row |
+| `RecordNotFound(String)` | `require_one` found no row |
 | `RecordNotInserted` | insert with `ON CONFLICT DO NOTHING` inserted nothing (use `try_insert()` to get `Ok`) |
 | `RecordNotUpdated` | `ActiveModel::update` matched no row |
+| _(no error)_ | delete of a missing row → `Ok(DeleteResult { rows_affected: 0 })` — check it yourself |
 | `PrimaryKeyNotSet { .. }` | `Update::one` / `Delete::one` `.validate()` with PK `NotSet` |
 | `BackendNotSupported { .. }` | feature not available on this backend (e.g. `exec_with_returning_keys` on MySQL) |
 | `ConnectionAcquire(..)` | pool exhausted / timeout |

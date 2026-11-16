@@ -7,7 +7,7 @@ migrations first and generating entities with `sea-orm-cli`.
 ```toml
 sea-orm = { version = "2.0", features = [
   "sqlx-postgres", "runtime-tokio-rustls", "macros",
-  "schema-sync",       # SchemaBuilder: apply / sync
+  "schema-sync",       # SchemaBuilder::sync (apply works without it)
   "entity-registry",   # auto-discover entities by module path (uses the `inventory` crate)
 ] }
 ```

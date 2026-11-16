@@ -14,7 +14,7 @@
 ## Breaking changes to fix
 | Area | v1 | v2 |
 |------|----|----|
-| `Expr` methods (`.eq`, `.add`, ...) | inherent | come from `ExprTrait` — `use sea_orm::ExprTrait;` (in prelude) |
+| `Expr` methods (`.eq`, `.add`, ...) | inherent | come from `ExprTrait` — add `use sea_orm::ExprTrait;` (not in `entity::prelude`) |
 | `IntoCondition` | needed for `.into_condition()` | not needed — use `.into()` |
 | `ConditionExpression` | exists | removed |
 | `Alias::new("x")` | needed for string idens | `&'static str` works directly |
@@ -33,7 +33,6 @@
 | MariaDB `RETURNING` | not supported | opt-in via `mariadb-use-returning` |
 | `DeriveValueType` | not usable as PK | implements `TryFromU64` / `IntoActiveValue` — newtype PKs work |
 | Migrations | Postgres runs all in one batch txn | each migration wrapped individually; `use_transaction()` per migration |
-| Migration attr | `#[async_trait]` re-export | use `#[async_trait::async_trait]` (CLI template form) |
 
 ## New in v2 (opt-in)
 | Feature | How |

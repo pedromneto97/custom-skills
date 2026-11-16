@@ -9,14 +9,14 @@ let row: Option<cake_filling::Model> = CakeFilling::find_by_id((6, 8)).one(db).a
 
 ## Filter + order
 ```rust
-// Dense model (#[sea_orm::model]) — prefer COLUMN
+// #[sea_orm::model] / #[sea_orm::compact_model] — prefer COLUMN
 let results: Vec<cake::Model> = Cake::find()
     .filter(cake::COLUMN.name.contains("chocolate"))
     .order_by_asc(cake::COLUMN.name)
     .all(db)
     .await?;
 
-// Compact model / v1 style — Column enum
+// Plain #[derive(DeriveEntityModel)] (v1 style) — Column enum only
 let results = Cake::find()
     .filter(cake::Column::Name.contains("chocolate"))
     .order_by_asc(cake::Column::Name)
@@ -24,7 +24,7 @@ let results = Cake::find()
     .await?;
 ```
 
-## v2 — Strongly-typed COLUMN constants (requires `#[sea_orm::model]`)
+## v2 — Strongly-typed COLUMN constants (requires `#[sea_orm::model]` or `#[sea_orm::compact_model]`)
 ```rust
 // Old (Column enum — no compile-time type enforcement)
 cake::Column::Name.contains("choc")
@@ -84,8 +84,9 @@ let with_fruits: Vec<(cake::Model, Vec<fruit::Model>)> =
 ```rust
 let cakes: Vec<cake::Model> = Cake::find().all(db).await?;
 
-// 1-to-1
-let fruit: Vec<Option<fruit::Model>> = cakes.load_one(Fruit, db).await?;
+// 1-to-1 / N-1 (relation must be has_one or belongs_to — load_one on has_many errors at runtime)
+let fruits: Vec<fruit::Model> = Fruit::find().all(db).await?;
+let cake_of_each: Vec<Option<cake::Model>> = fruits.load_one(Cake, db).await?;
 
 // 1-to-many
 let all_fruits: Vec<Vec<fruit::Model>> = cakes.load_many(Fruit, db).await?;
@@ -107,8 +108,9 @@ let super_cake: cake::ModelEx = cake::Entity::load()
     .one(db)
     .await?
     .unwrap();
-// super_cake.fruit    → HasOne::Loaded(Some(fruit::ModelEx { .. }))
-// super_cake.fillings → HasMany::Loaded(vec![filling::ModelEx { .. }])
+// super_cake.fruits   → HasMany::Loaded(vec![fruit::ModelEx { .. }])    (cake has_many fruit)
+// super_cake.fillings → HasMany::Loaded(vec![filling::ModelEx { .. }])  (M-N via cake_filling)
+// a has_one field would be HasOne::Loaded(Some(..))
 // unrequested relations stay HasOne::Unloaded / HasMany::Unloaded
 // (field names come from the relation fields on cake::Model)
 

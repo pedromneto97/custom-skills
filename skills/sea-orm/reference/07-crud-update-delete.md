@@ -28,8 +28,8 @@ let pear: fruit::Model = pear.update(db).await?;
 
 ### Force-update all columns
 ```rust
-pear.reset_all();                           // mark all columns as Set
-pear.reset(fruit::Column::CakeId);          // force a specific column
+let mut pear = pear.reset_all();            // Unchanged → Set for every column (NotSet stays NotSet)
+pear.reset(fruit::Column::CakeId);          // force a single column (&mut self)
 let pear = pear.update(db).await?;
 ```
 
@@ -64,8 +64,8 @@ fruit::Entity::update_many()
     .await?;
 ```
 
-> `Expr` methods like `.add()` / `.eq()` come from `ExprTrait` in v2 —
-> `use sea_orm::ExprTrait;` (or the prelude).
+> `Expr` methods like `.add()` / `.eq()` come from `ExprTrait` in v2 — add
+> `use sea_orm::ExprTrait;`. `sea_orm::entity::prelude::*` does **not** re-export it.
 
 ### Update with returning (Postgres / SQLite / MariaDB with `mariadb-use-returning`)
 ```rust
@@ -122,7 +122,7 @@ let res: DeleteResult = fruit::Entity::delete_many()
     .await?;
 ```
 
-### Delete with returning (Postgres / SQLite / MSSQL `OUTPUT DELETED.*`)
+### Delete with returning (Postgres / SQLite / MariaDB with `mariadb-use-returning` / MSSQL `OUTPUT DELETED.*`)
 ```rust
 // Single — v2 returns Option<Model> (was Vec<Model>)
 let deleted: Option<fruit::Model> = fruit::Entity::delete_by_id(3)

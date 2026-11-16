@@ -60,7 +60,7 @@ features = [
 ```rust
 pub use sea_orm_migration::prelude::*;
 
-mod m20220101_000001_create_post;
+mod m20220101_000001_create_table;
 
 pub struct Migrator;
 
@@ -68,7 +68,7 @@ pub struct Migrator;
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
-            Box::new(m20220101_000001_create_post::Migration), // chronological order
+            Box::new(m20220101_000001_create_table::Migration), // chronological order
         ]
     }
 
@@ -79,7 +79,7 @@ impl MigratorTrait for Migrator {
 
 ## Migration file template
 ```rust
-// migration/src/m20220101_000001_create_post.rs
+// migration/src/m20220101_000001_create_table.rs
 use sea_orm_migration::{prelude::*, schema::*};
 
 #[derive(DeriveMigrationName)]
@@ -139,6 +139,7 @@ Default: Postgres wraps **each** migration in a transaction; MySQL and SQLite do
 auto-commits anyway). Override per migration:
 
 ```rust
+#[async_trait::async_trait]
 impl MigrationTrait for Migration {
     // None = backend default, Some(true) = force txn, Some(false) = no txn
     fn use_transaction(&self) -> Option<bool> { Some(false) }
@@ -274,7 +275,7 @@ cake::ActiveModel { name: Set("Cheesecake".to_owned()), ..Default::default() }
 ```
 
 ## Create tables from entities inside a migration
-Requires feature `schema-sync`. Useful when entities are the source of truth:
+No extra feature needed for `apply` (only `.sync` needs `schema-sync`). Useful when entities are the source of truth:
 ```rust
 async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
     let db = manager.get_connection();

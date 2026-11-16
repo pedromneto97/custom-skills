@@ -1,4 +1,4 @@
-# SeaORM v2 — Repository Boundary Patterns
+# SeaORM 2.x — Repository Boundary Patterns
 
 This reference focuses on adapter boundaries in hexagonal architectures:
 - keep SeaORM entities inside outbound,
@@ -57,7 +57,7 @@ fn map_db_err(err: DbErr) -> DomainError {
         _ => {}
     }
     match err {
-        DbErr::RecordNotFound(_) => DomainError::NotFound,
+        DbErr::RecordNotFound(_) | DbErr::RecordNotUpdated => DomainError::NotFound,
         _ => DomainError::Infrastructure("database error".into()),
     }
 }
@@ -65,36 +65,20 @@ fn map_db_err(err: DbErr) -> DomainError {
 
 `SqlErr` is `#[non_exhaustive]` — always keep a fallback arm.
 
-## Transaction pattern
+Deletes never error on a missing row — map `rows_affected == 0` to `NotFound` explicitly:
 
 ```rust
-use sea_orm::{TransactionError, TransactionTrait};
-
-let value = db
-    .transaction::<_, ResultType, DomainError>(|txn| {
-        Box::pin(async move {
-            let root = root::ActiveModel { ..Default::default() }
-                .insert(txn)
-                .await
-                .map_err(map_db_err)?;
-
-            related::Entity::insert_many(build_related(root.id))
-                .exec(txn)
-                .await
-                .map_err(map_db_err)?;
-
-            Ok(ResultType::from(root))
-        })
-    })
-    .await
-    .map_err(|e| match e {
-        TransactionError::Transaction(domain) => domain,
-        TransactionError::Connection(_) => DomainError::Infrastructure("database connection".into()),
-    })?;
+let res = order::Entity::delete_by_id(id).exec(db).await.map_err(map_db_err)?;
+if res.rows_affected == 0 {
+    return Err(DomainError::NotFound);
+}
 ```
 
-More options (manual `begin`, savepoints, isolation level, async-closure API):
-see `11-transactions.md`.
+## Transaction pattern
+
+Wrap multi-step writes in `db.transaction(..)` and map `TransactionError` back to the domain
+error — full examples (closure, async-closure, manual, savepoints, isolation) in
+`11-transactions.md`. Inside the closure, call `map_db_err` on every query.
 
 ### Repositories that work inside or outside a transaction
 Take `&impl ConnectionTrait` (or a generic `C: ConnectionTrait`) so the same method accepts
