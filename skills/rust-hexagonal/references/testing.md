@@ -141,11 +141,10 @@ For real-DB integration tests, use `testcontainers`:
 
 ```toml
 # outbound/Cargo.toml [dev-dependencies]
-testcontainers = "0.15"
-testcontainers-modules = { version = "0.3", features = ["postgres"] }
+testcontainers-modules = { version = "0.15", features = ["postgres"] }  # re-exports testcontainers
 ```
 
-> See the **`sea-orm` skill** for full MockDatabase and testcontainers patterns.
+> See the **`sea-orm` skill** (`reference/14-testing.md`) for full MockDatabase, SQLite in-memory and testcontainers patterns.
 
 ---
 

@@ -1,4 +1,4 @@
-# SeaORM v2 — CRUD: Insert
+# SeaORM 2.x — CRUD: Insert
 
 ## Insert one — get Model back
 ```rust
@@ -11,142 +11,154 @@ let pear: fruit::Model = pear.insert(db).await?;
 
 ## Insert one — get last insert id
 ```rust
-let res: InsertResult = fruit::Entity::insert(pear).exec(db).await?;
+let res: InsertResult<fruit::ActiveModel> = fruit::Entity::insert(pear).exec(db).await?;
 println!("{}", res.last_insert_id);
+```
+
+## Save (insert-or-update)
+```rust
+// PK NotSet → INSERT; PK Set/Unchanged → UPDATE. Saving an unchanged model is a no-op.
+let am: fruit::ActiveModel = fruit::ActiveModel { name: Set("Kiwi".into()), ..Default::default() }
+    .save(db)
+    .await?;
 ```
 
 ## Insert many
 ```rust
-let res: InsertResult = fruit::Entity::insert_many([apple, orange]).exec(db).await?;
+// v2: returns InsertManyResult; last_insert_id is Option<_>
+let res = fruit::Entity::insert_many([apple, orange]).exec(db).await?;
+let last: Option<i32> = res.last_insert_id;
 ```
 
-Useful for initialization flows where one transaction creates a root record and related defaults.
+Empty input is **not** an error in v2 — it returns `Ok` with `last_insert_id == None`
+(and `vec![]` for `exec_with_returning`). `on_empty_do_nothing()` is no longer needed
+(deprecated since 2.0).
 
-## Insert many — empty guard
-```rust
-let res = Bakery::insert_many(std::iter::empty())
-    .on_empty_do_nothing()
-    .exec(db)
-    .await;
-assert!(matches!(res, Ok(TryInsertResult::Empty)));
-```
+## Insert with returning
+Native `RETURNING` on Postgres and SQLite (≥ 3.35, default feature), MariaDB with
+`mariadb-use-returning`, and MSSQL via SeaORM-X (`OUTPUT INSERTED.*`).
 
-## Insert with returning (Postgres / SQLite / MSSQL OUTPUT)
+| Call | MySQL (no RETURNING) |
+|------|----------------------|
+| `insert(am).exec_with_returning` | works — SeaORM runs INSERT, then `find_by_id(last_insert_id)` |
+| `insert_many(..).exec_with_returning` | `DbErr::BackendNotSupported` |
+| `exec_with_returning_keys` | `DbErr::BackendNotSupported` |
+
 ```rust
 // Single
-let model = cake::Entity::insert(active_model).exec_with_returning(db).await?;
-// -> cake::Model
+let model: cake::Model = cake::Entity::insert(active_model).exec_with_returning(db).await?;
 
 // Many
-let models = cake::Entity::insert_many([am1, am2]).exec_with_returning(db).await?;
-// -> Vec<cake::Model>
+let models: Vec<cake::Model> = cake::Entity::insert_many([am1, am2]).exec_with_returning(db).await?;
 
-// Composite PK keys only
-let keys = link::Entity::insert_many([am1, am2])
+// Primary keys only (e.g. composite PK)
+let keys: Vec<(i32, i32)> = link::Entity::insert_many([am1, am2])
     .exec_with_returning_keys(db)
-    .await?;
-// -> Vec<(i32, i32)>
+    .await?;   // MySQL → DbErr::BackendNotSupported
 ```
 
-## On-conflict
-```rust
-use sea_query::OnConflict;
+> Deprecated in 2.0: `insert_many(..).exec_with_returning_many` (use `exec_with_returning`), `Insert::do_nothing()`
+> and `on_empty_do_nothing()` (use `try_insert()` / `on_conflict_do_nothing*()`).
 
-// Do nothing (shorthand)
+## On-conflict
+
+A conflict that ends with **no row inserted or updated** returns `Err(DbErr::RecordNotInserted)`.
+Call `.try_insert()` to get `TryInsertResult` instead of an error.
+
+```rust
+use sea_orm::sea_query::OnConflict;
+use sea_orm::TryInsertResult;
+
+// Upsert — update on conflict
 entity::Entity::insert(am)
-    .on_conflict_do_nothing()
+    .on_conflict(
+        OnConflict::column(entity::Column::Name)
+            .update_column(entity::Column::Price)
+            .to_owned(),
+    )
     .exec(db)
     .await?;
 
-// Do nothing on specific column conflict
-entity::Entity::insert(am)
+// Do nothing on a specific column — tolerate conflict
+let res = entity::Entity::insert_many(items)
     .on_conflict(
         OnConflict::column(entity::Column::Name)
             .do_nothing()
-            .to_owned()
+            .to_owned(),
     )
+    .try_insert()
     .exec(db)
     .await?;
 
-// Upsert
-entity::Entity::insert(am)
-    .on_conflict(
-        OnConflict::column(entity::Column::Name)
-            .update_column(entity::Column::Name)
-            .to_owned()
-    )
+match res {
+    TryInsertResult::Inserted(r) => { /* r.last_insert_id */ }
+    TryInsertResult::Conflicted  => { /* all rows skipped */ }
+    TryInsertResult::Empty       => { /* no input rows */ }
+}
+
+// Shorthands — both return TryInsert (→ TryInsertResult), with a MySQL polyfill
+// Postgres/SQLite: ON CONFLICT ("id") DO NOTHING
+// MySQL:           ON DUPLICATE KEY UPDATE `id` = `id`
+let res = entity::Entity::insert(am)
+    .on_conflict_do_nothing()                          // conflict on PK
     .exec(db)
     .await?;
 
-// insert_many + do_nothing() → TryInsertResult::Conflicted instead of error
 let res = entity::Entity::insert_many(items)
-    .on_conflict(on_conflict)
-    .do_nothing()
+    .on_conflict_do_nothing_on([entity::Column::Name]) // conflict on given columns
     .exec(db)
-    .await;
-assert!(matches!(res, Ok(TryInsertResult::Conflicted)));
+    .await?;
 ```
 
-## Transactions
+## Nested insert with the ActiveModel builder (v2, `#[sea_orm::model]` only)
+
+Insert a graph of related rows in one call. SeaORM runs it in a single transaction and inserts in
+FK order (parents first).
 
 ```rust
-use sea_orm::{TransactionTrait, TransactionError};
-
-// Closure receives &txn — use it in place of &db for all queries inside the transaction.
-// Type params: <_, ReturnType, ErrorType>
-let result = db.transaction::<_, (User, Order), DomainError>(|txn| {
-    Box::pin(async move {
-        let user: User = user::ActiveModel { name: Set("Alice".into()), ..Default::default() }
-            .insert(txn).await
-            .map_err(|e| DomainError::Infrastructure(e.to_string()))?
-            .into();
-
-        let order: Order = order::ActiveModel {
-            user_id: Set(user.id),
-            ..Default::default()
-        }
-        .insert(txn).await
-        .map_err(|e| DomainError::Infrastructure(e.to_string()))?
-        .into();
-
-        Ok((user, order))
-    })
-})
-.await
-.map_err(|err| match err {
-    TransactionError::Transaction(domain_err) => domain_err,        // error from inside the closure
-    TransactionError::Connection(_)           => DomainError::Infrastructure("db".into()),
-})?;
+let bob = user::ActiveModel::builder()
+    .set_name("Bob")
+    .set_email("bob@example.com")
+    .set_profile(profile::ActiveModel::builder().set_picture("bob.jpg"))   // has_one
+    .add_post(post::ActiveModel::builder().set_title("Hello"))             // has_many
+    .add_post(post::ActiveModel::builder().set_title("World"))
+    .add_tag(tag::ActiveModel::builder().set_name("rust"))                 // M-N via junction
+    .save(db)
+    .await?;
 ```
+
+The builder produces an `ActiveModelEx` with `ActiveHasOne` / `ActiveHasMany` / `ActiveBelongsTo`
+fields. Plain `ActiveModel` is unchanged — use the builder only where nested writes help.
+
+## Transactions
+Multi-statement inserts belong in a transaction — see `11-transactions.md`.
 
 ### Batch initialization inside a transaction
 
 ```rust
-let user = users::ActiveModel { email: Set(email), ..Default::default() }
-    .insert(txn)
-    .await?;
-
-let defaults = vec![
-    settings::ActiveModel { user_id: Set(user.id), key: Set("theme".into()), value: Set("light".into()) },
-    settings::ActiveModel { user_id: Set(user.id), key: Set("locale".into()), value: Set("en".into()) },
-];
-
-settings::Entity::insert_many(defaults).exec(txn).await?;
-```
-
-> **Duplicate-key errors inside a transaction:** map the `DbErr` to the appropriate domain
-> error *before* returning from the closure — e.g. inspect the error message for
-> `"Duplicate entry"` (MySQL) or `"duplicate key value"` (Postgres) and map to a
-> conflict variant.
-
-```rust
-fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
-    let msg = err.to_string();
-    msg.contains("duplicate key")
-        || msg.contains("Duplicate entry")
-        || msg.contains("UNIQUE constraint failed")
+// `setting` = (id PK, user_id, key, value); txn from 11-transactions.md
+let user = user::ActiveModel {
+    name: Set(name),
+    email: Set(email),
+    active: Set(true),
+    ..Default::default()
 }
+.insert(txn)
+.await?;
+
+let defaults = [("theme", "light"), ("locale", "en")].map(|(k, v)| setting::ActiveModel {
+    user_id: Set(user.id),
+    key: Set(k.into()),
+    value: Set(v.into()),
+    ..Default::default()                       // id stays NotSet → auto-increment
+});
+
+setting::Entity::insert_many(defaults).exec(txn).await?;
 ```
+
+## Duplicate-key errors
+Classify with `err.sql_err()` → `SqlErr::UniqueConstraintViolation` — don't string-match driver
+messages. Snippet and full mapping: `12-error-handling.md`.
 
 ---
 

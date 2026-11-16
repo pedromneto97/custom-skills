@@ -1,49 +1,99 @@
-# SeaORM v2 — Cargo Setup
+# SeaORM 2.x — Cargo Setup
 
-## Open-source (Postgres / MySQL / SQLite)
+> SeaORM 2.0 is stable (latest checked: `2.0.4`). Requires Rust **edition 2024**, MSRV **1.94**
+> (`sea-orm-sync`: 1.88). Built on SeaQuery 1.0 and SQLx 0.9.
+> Pick one or more **DB driver** features and exactly one **async runtime** feature.
+
+## Open-source (Postgres / MySQL / MariaDB / SQLite)
 ```toml
 [dependencies.sea-orm]
-version = "2.0.0-rc"
+version = "2.0"
 features = [
-  "sqlx-postgres",          # or sqlx-mysql, sqlx-sqlite
-  "runtime-tokio-rustls",   # or runtime-async-std-rustls / *-native-tls
-  "macros",
+  "sqlx-postgres",          # or sqlx-mysql (MySQL + MariaDB), sqlx-sqlite
+  "runtime-tokio-rustls",   # or runtime-tokio-native-tls; runtime-tokio (SQLite only)
+  "macros",                 # required for entity derives
   "with-uuid",
   "with-chrono",            # or with-time
 ]
-
-[dependencies.sea-orm-migration]
-version = "2.0.0-rc"
-features = ["runtime-tokio-rustls", "sqlx-postgres"]
 ```
 
-## SeaORM-X (MSSQL — commercial, via Git SSH)
+Migration crate dependencies: see `03-migrations.md`.
+
+> Default features: `macros`, `with-json`, `with-chrono`, `with-time`, `with-uuid`,
+> `with-rust_decimal`, `sqlite-use-returning-for-3_35`, `stream`. With `default-features = false`
+> re-add the ones you need — dropping `sqlite-use-returning-for-3_35` makes SQLite
+> `insert_many`/`update_many(..).exec_with_returning` return `BackendNotSupported`, and dropping
+> `stream` removes `.stream()` / `StreamTrait`.
+>
+> `runtime-async-std-*` features still exist but are **deprecated** — use tokio.
+> Sync (no async runtime) SQLite via `rusqlite` lives in the separate crate `sea-orm-sync`.
+
+## SeaORM-X (MSSQL — commercial, closed beta)
+Requires SSH access to the private `sea-orm-x` repo. Still pinned to `2.0.0-rc`.
+
 ```toml
+# Option A — git over SSH
 [dependencies.sea-orm]
 git = "ssh://git@github.com/SeaQL/sea-orm-x.git"
 features = ["runtime-tokio-rustls", "sqlz-mssql", "macros", "with-uuid", "with-chrono"]
 
 [dependencies.sea-orm-migration]
 git = "ssh://git@github.com/SeaQL/sea-orm-x.git"
+features = ["runtime-tokio-rustls", "sqlz-mssql"]   # needed to run migrations via the CLI
+
+# Option B — local checkout
+# sea-orm           = { version = "2.0.0-rc", path = "<SEA_ORM_X_ROOT>/sea-orm-x", features = [...] }
+# sea-orm-migration = { version = "2.0.0-rc", path = "<SEA_ORM_X_ROOT>/sea-orm-x/sea-orm-migration" }
 ```
 
+`sqlz-mssql` can be combined with `sqlx-postgres` / `sqlx-mysql` / `sqlx-sqlite`.
+
 ## Feature flag reference
+
+### Drivers & runtimes
 | Flag | Purpose |
 |------|---------|
-| `sqlx-postgres` / `sqlx-mysql` / `sqlx-sqlite` | Open-source DB backends |
+| `sqlx-postgres` / `sqlx-mysql` / `sqlx-sqlite` | Open-source DB backends (`sqlx-mysql` covers MariaDB; `sqlx-postgres` also enables `postgres-array`) |
+| `sqlx-all` | All three sqlx backends |
 | `sqlz-mssql` | MSSQL backend (SeaORM-X only) |
 | `runtime-tokio-rustls` | Tokio + rustls TLS (recommended) |
 | `runtime-tokio-native-tls` | Tokio + native-tls |
-| `runtime-async-std-rustls` | async-std + rustls |
-| `macros` | Required for entity derives |
+| `runtime-tokio` | Tokio, no TLS (SQLite only) |
+
+### Core / tooling
+| Flag | Purpose |
+|------|---------|
+| `macros` | Entity derives (`DeriveEntityModel`, `#[sea_orm::model]`, ...) |
+| `mock` | Mock DB for unit tests |
+| `debug-print` | Print every SQL to logger |
+| `tracing-spans` | Emit tracing spans per DB operation (`ConnectOptions::record_stmt_in_spans`) |
+| `schema-sync` | Entity-first schema creation / sync (see `13-entity-first.md`) |
+| `entity-registry` | Auto-register entities for `get_schema_registry` (with `schema-sync`) |
+| `rbac` | Role-based access control layer |
+| `seaography` | GraphQL integration |
+
+### Types
+| Flag | Purpose |
+|------|---------|
 | `with-chrono` | `chrono` date/time types |
 | `with-time` | `time` crate types |
 | `with-uuid` | `uuid::Uuid` |
 | `with-json` | `serde_json::Value` |
 | `with-rust_decimal` | `rust_decimal::Decimal` |
-| `mock` | Mock DB for unit tests |
-| `debug-print` | Print every SQL to logger |
-| `schema-sync` | Entity-first schema creation |
+| `with-bigdecimal` | `bigdecimal::BigDecimal` |
+| `with-ipnetwork` | `ipnetwork` types (Postgres `inet`/`cidr`) |
+| `with-mac_address` | `mac_address` types (Postgres `macaddr`) |
+| `postgres-array` | Postgres array columns (`Vec<T>`) |
+| `postgres-vector` | pgvector support |
+| `with-arrow` | Apache Arrow interop |
+
+### Backend behavior
+| Flag | Purpose |
+|------|---------|
+| `sqlite-use-returning-for-3_35` | Use `RETURNING` on SQLite ≥ 3.35 (default feature in 2.0 — gone with `default-features = false`) |
+| `stream` | `.stream()` / `StreamTrait` (default feature) |
+| `mariadb-use-returning` | Use `RETURNING` on MariaDB (enables `exec_with_returning`) |
+| `postgres-use-serial-pk` | Restore v1 `serial` PKs instead of `GENERATED BY DEFAULT AS IDENTITY` |
 
 ## Workspace layout
 ```toml
